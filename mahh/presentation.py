@@ -26,6 +26,11 @@ AVIS = {
     "piece-ajoutee": "L’élément a été ajouté au dossier du projet.",
     "instruction-creee": "L’instruction a été publiée.",
     "sommation-creee": "La direction a été sommée d’avancer.",
+    "abonnement-cree": "L’abonnement est enregistré. Le paiement ne l’est pas encore.",
+    "paiement-enregistre": "Le paiement a été enregistré.",
+    "signalement-enregistre": "Le signalement « poubelle pleine » a été enregistré.",
+    "passage-enregistre": "La position de l’agent a été enregistrée.",
+    "suivi-enregistre": "Le suivi du jour a été enregistré.",
 }
 
 
@@ -50,6 +55,7 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
             ("/directions", "Directions", "directions"),
             ("/bsd", "Tableau de bord", "bsd"),
             ("/instructions", "Instructions", "instructions"),
+            ("/ordures", "Ordures", "ordures"),
         ]
         if utilisateur["administrateur"]:
             liens.extend(
