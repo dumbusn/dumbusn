@@ -18,49 +18,63 @@ from mahh.texte import echapper
 
 
 def accueil(ctx):
-    exiger_connexion(ctx)
-    corps = """
-    <h1>Application du ministère</h1>
-    <p class="chapeau">Une seule application, quatre blocs. Deux sont en service dans ce socle.
-    La collecte des ordures, le SEG et le SNAPE sont décrits et ne sont pas encore des écrans.
-    La page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions.</p>
+    if ctx.utilisateur is None:
+        entree = (
+            '<p><a class="bouton" href="/connexion">Se connecter</a></p>'
+            "<p>Après la connexion, cette page reste la première.</p>"
+        )
+    else:
+        entree = ""
+    corps = entree + """
+    <h1>Accueil</h1>
+    <p class="chapeau">Première page après la connexion. Quatre blocs, puis la page d’instructions.</p>
+    <p class="bandeau bandeau-exemple" data-accueil="exemples">Les projets affichés sont des exemples fictifs.
+    Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.</p>
+    <h2>Les quatre blocs</h2>
     <div class="cartes">
-      <article class="carte">
+      <article class="carte" data-bloc="directions">
         <p class="etat etat-ouvert">En service</p>
-        <h2>Gestion documentaire</h2>
-        <p>Dossiers et fichiers dans l’arbre des directions, avec des privilèges par groupe.</p>
+        <h2>Directions et dossiers</h2>
+        <p>Dossiers et fichiers de toutes les directions, dans l’arbre de la note.</p>
         <a class="bouton" href="/directions">Ouvrir les directions</a>
       </article>
-      <article class="carte">
+      <article class="carte" data-bloc="bsd">
         <p class="etat etat-ouvert">En service</p>
-        <h2>Tableau de bord du BSD</h2>
-        <p>Registre des projets, filtres et indicateurs. Le jeu chargé au départ est un exemple fictif.</p>
+        <h2>Tableau du BSD</h2>
+        <p>Suivi des projets. Le code d’un projet ouvre son dossier.</p>
         <a class="bouton" href="/bsd">Ouvrir le tableau de bord</a>
       </article>
-      <article class="carte">
+      <article class="carte" data-bloc="ordures">
         <p class="etat etat-ferme">Pas construit</p>
         <h2>Collecte des ordures</h2>
-        <p>Abonnement, paiement, tournées et signalement. Le périmètre est écrit, l’écran n’existe pas.</p>
+        <p>Abonnement, paiement et tournées. Le périmètre est écrit, l’écran n’existe pas.</p>
         <a class="bouton secondaire" href="/prevu/ordures">Lire le périmètre</a>
       </article>
-      <article class="carte">
+      <article class="carte" data-bloc="eau">
         <p class="etat etat-ferme">Pas construit</p>
-        <h2>Eau, SEG et SNAPE</h2>
-        <p>SEG en ville, SNAPE en zone rurale. Demande, abonnement et indicateurs : pas encore construits.</p>
+        <h2>SEG et SNAPE</h2>
+        <p>SEG en ville, SNAPE en zone rurale. Ces écrans ne sont pas construits.</p>
         <a class="bouton secondaire" href="/prevu/eau">Lire le périmètre</a>
       </article>
     </div>
+    <h2>Instructions</h2>
+    <article class="carte" data-bloc="instructions">
+      <p>Page destinée aux écrans du ministère : du ministre au chef de cabinet,
+      au secrétaire général, puis aux directions et services.</p>
+      <a class="bouton" href="/instructions">Ouvrir les instructions</a>
+    </article>
     """
     return page("Accueil", corps, ctx, actif="accueil")
 
 
 def page_connexion(ctx, erreur=None, statut=200):
     if ctx.utilisateur is not None:
-        return Redirection(url_sure(ctx.requete.get("suivant")))
+        return Redirection("/")
     suivant = url_sure(ctx.requete.get("suivant") or ctx.formulaire.get("suivant") or "/")
     corps = (
         "<h1>Connexion</h1>"
-        "<p>Accès réservé aux comptes créés par l’administrateur.</p>"
+        "<p>Accès réservé aux comptes créés par l’administrateur. "
+        "Après la connexion, la première page est l’accueil.</p>"
         '<form method="post" action="/connexion" class="formulaire">'
         + jeton_cache(ctx)
         + f'<input type="hidden" name="suivant" value="{echapper(suivant)}">'
@@ -87,7 +101,7 @@ def action_connexion(ctx):
         jeton = ouvrir_session(conn, personne["id"])
     ctx.cookies.append(cookie_session(jeton))
     ctx.cookies.append(cookie_jeton(nouveau_jeton()))
-    return Redirection(url_sure(ctx.formulaire.get("suivant") or "/"))
+    return Redirection("/")
 
 
 def action_deconnexion(ctx):

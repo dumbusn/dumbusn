@@ -153,6 +153,10 @@ def fichier_multipart(champs, nom_fichier, contenu):
 
 def parcours(hote, numero):
     admin = Client(hote, numero)
+    statut, _, page, _ = admin.appel("GET", "/", suivre=False)
+    verifie(statut == 200 and "<h1>Accueil</h1>" in page, "accueil sans session")
+    verifie("Directions et dossiers" in page and "Tableau du BSD" in page, "blocs visibles sans session")
+    verifie("Ouvrir les instructions" in page and "Les projets affichés sont des exemples" in page, "instructions et exemples sans session")
     statut, chemin, page, _ = admin.appel("GET", "/connexion")
     verifie(statut == 200, f"connexion {statut}")
     statut, chemin, page, _ = admin.appel(
@@ -160,8 +164,16 @@ def parcours(hote, numero):
         "/connexion",
         {"identifiant": "admin", "mot_de_passe": "admin-socle-2026", "jeton": jeton(page), "suivant": "/"},
     )
-    verifie(statut == 200 and "Application du ministère" in page, "accueil après connexion")
+    verifie(statut == 200 and "<h1>Accueil</h1>" in page, "accueil après connexion")
+    verifie("Directions et dossiers" in page and "Tableau du BSD" in page, "blocs en service")
+    verifie("Collecte des ordures" in page and "SEG et SNAPE" in page, "blocs à venir")
+    verifie("Ouvrir les instructions" in page, "accès aux instructions depuis l’accueil")
+    verifie("Les projets affichés sont des exemples" in page, "rappel exemples")
     verifie(page.count("Pas construit") == 2, "deux blocs non construits")
+    _, _, ailleurs, _ = admin.appel("GET", "/bsd")
+    verifie('class="nav nav-accueil"' in ailleurs, "accès accueil depuis le tableau")
+    _, _, retour, _ = admin.appel("GET", "/")
+    verifie("<h1>Accueil</h1>" in retour, "retour à l’accueil")
 
     statut, chemin, page, _ = admin.appel("GET", "/directions")
     verifie("Cellule informatique" not in page, "la cellule du classeur n'est pas une structure")

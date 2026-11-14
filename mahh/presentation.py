@@ -61,7 +61,9 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
         liens.append(("/compte", "Compte", "compte"))
         elements = []
         for href, libelle, cle in liens:
-            classe = " actif" if cle == actif else ""
+            classe = " nav-accueil" if cle == "accueil" else ""
+            if cle == actif:
+                classe += " actif"
             elements.append(
                 f'<a class="nav{classe}" href="{href}">{echapper(libelle)}</a>'
             )

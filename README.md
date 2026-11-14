@@ -16,6 +16,8 @@ python3 -m mahh
 
 Puis ouvrir http://127.0.0.1:8000/
 
+Après la connexion, la première page est l’accueil : les quatre blocs, la page d’instructions, et le rappel que les projets affichés sont des exemples. Le bouton Accueil, en tête de chaque page, y ramène.
+
 Au premier lancement, le compte administrateur est créé.
 
 - Si `MAHH_ADMIN_MOT_DE_PASSE` est défini (10 caractères au minimum), ce mot de passe est utilisé et il n’est pas réécrit.

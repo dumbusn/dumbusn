@@ -70,6 +70,15 @@ body {
   border-bottom: 2px solid transparent;
 }
 .navigation a.actif { border-bottom-color: var(--vert); color: var(--vert); font-weight: 700; }
+.navigation a.nav-accueil {
+  background: var(--vert);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0.35rem 0.8rem;
+  border-bottom: none;
+  font-weight: 700;
+}
+.navigation a.nav-accueil.actif { background: var(--vert-clair); color: #fff; }
 
 .session { display: flex; align-items: center; gap: 0.8rem; }
 .session p { margin: 0; color: var(--encre-douce); }
