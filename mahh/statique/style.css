@@ -157,6 +157,18 @@ input, select, textarea {
 }
 textarea { min-height: 7rem; resize: vertical; }
 fieldset { border: 1px solid var(--filet); border-radius: 4px; display: grid; gap: 0.3rem; }
+fieldset.compte {
+  background: var(--carte);
+  border-radius: 8px;
+  padding: 1rem 1.1rem 1.2rem;
+  max-width: 36rem;
+}
+fieldset.compte legend {
+  font-family: var(--serif);
+  font-size: 1.25rem;
+  padding: 0 0.35rem;
+}
+optgroup { font-weight: 700; }
 
 .cartes, .indicateurs { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.8rem; }
 .carte, .carte-chiffre, .domaine {

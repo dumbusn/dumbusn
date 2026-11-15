@@ -1,7 +1,14 @@
 """Comptes, groupes et privilèges. Réservé à l'administrateur, sauf le changement de mot de passe."""
 
 from mahh.db import base
-from mahh.droits import FONCTION_COMMUNICATION, FONCTIONS, exiger_admin, exiger_connexion
+from mahh.droits import (
+    FONCTION_COMMUNICATION,
+    FONCTIONS,
+    NIVEAUX,
+    NIVEAUX_DIRECTION,
+    exiger_admin,
+    exiger_connexion,
+)
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Redirection, ValeurRefusee
 from mahh.securite import (
@@ -278,7 +285,13 @@ def page_utilisateurs(ctx, erreur=None):
     with base() as conn:
         personnes = conn.execute("SELECT * FROM utilisateur ORDER BY nom").fetchall()
         structures = conn.execute(
-            "SELECT id, nom FROM noeud WHERE genre = 'structure' ORDER BY nom"
+            """
+            SELECT structure.id, structure.nom, structure.intitule, domaine.nom AS domaine
+            FROM noeud AS structure
+            JOIN noeud AS domaine ON domaine.id = structure.parent_id
+            WHERE structure.genre = 'structure' AND domaine.genre = 'domaine'
+            ORDER BY domaine.ordre, structure.ordre, structure.nom
+            """
         ).fetchall()
         lignes = []
         for personne in personnes:
@@ -304,35 +317,33 @@ def page_utilisateurs(ctx, erreur=None):
         + "".join(lignes)
         + "</tbody></table>"
         + '<form method="post" action="/utilisateurs" class="formulaire">'
+        + '<fieldset class="compte"><legend>Nouveau compte</legend>'
         + jeton_cache(ctx)
+        + '<label for="nom">Nom</label>'
+        + '<input id="nom" name="nom" maxlength="80" required autocomplete="name">'
         + '<label for="identifiant">Identifiant</label>'
         + '<input id="identifiant" name="identifiant" maxlength="40" required autocomplete="off">'
-        + '<label for="nom">Nom affiché</label>'
-        + '<input id="nom" name="nom" maxlength="80" required>'
         + '<label for="mot">Mot de passe initial</label>'
         + '<input id="mot" name="mot_de_passe" type="password" required autocomplete="new-password">'
-        + '<label class="case"><input type="checkbox" name="administrateur"> Administrateur</label>'
-        + '<label for="fonction">Fonction</label>'
-        + '<select id="fonction" name="fonction">'
-        + '<option value="">Aucune fonction de hiérarchie</option>'
+        + '<label for="niveau">Niveau</label>'
+        + '<select id="niveau" name="fonction" data-niveaux="1">'
+        + '<option value="">Choisir le niveau</option>'
         + "".join(
-            f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in FONCTIONS.items()
+            f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in NIVEAUX
         )
+        + '<option value="bsd">BSD</option>'
         + '<option value="communication">Cellule de communication</option>'
         + "</select>"
-        + '<label for="structure">Rattachement</label>'
+        + '<label for="structure">Direction rattachée</label>'
         + '<select id="structure" name="structure_id">'
-        + '<option value="">Aucun rattachement</option>'
-        + "".join(
-            f'<option value="{int(structure["id"])}">{echapper(structure["nom"])}</option>'
-            for structure in structures
-        )
+        + '<option value="">Choisir la direction</option>'
+        + _options_directions(structures)
         + "</select>"
-        + '<p class="aide">Une fonction de hiérarchie ouvre tout le ministère. '
-        "La cellule de communication rédige la page publique, sans ouvrir les directions. "
-        "Sans fonction, le rattachement limite le compte à une direction ou un service. "
-        "Une direction ne gère pas la page publique.</p>"
-        + '<button type="submit">Créer le compte</button></form>'
+        + '<label class="case"><input type="checkbox" name="administrateur"> Administrateur de l’application</label>'
+        + '<p class="aide">Le ministre, le secrétaire général, le chef de cabinet et le BSD voient tout le ministère. '
+        "À partir du directeur, le compte ne voit que la direction rattachée, et ce qui la concerne. "
+        "La cellule de communication rédige la page publique, sans ouvrir les directions.</p>"
+        + '<button type="submit">Créer le compte</button></fieldset></form>'
     )
     return page("Utilisateurs", corps, ctx, actif="utilisateurs", erreur=erreur)
 
@@ -348,17 +359,17 @@ def action_utilisateur(ctx):
     admin = 1 if ctx.formulaire.get("administrateur") is not None else 0
     fonction = (ctx.formulaire.get("fonction") or "").strip()
     if fonction not in FONCTIONS and fonction not in ("", FONCTION_COMMUNICATION):
-        return page_utilisateurs(ctx, erreur="Cette fonction n’est pas reconnue.")
+        return page_utilisateurs(ctx, erreur="Ce niveau n’est pas reconnu.")
     with base() as conn:
         if conn.execute(
             "SELECT id FROM utilisateur WHERE lower(identifiant) = lower(?)", (ident,)
         ).fetchone():
             return page_utilisateurs(ctx, erreur="Cet identifiant est déjà utilisé.")
-        structure_id = None
-        if not fonction:
-            structure_id = _structure_compte(conn, ctx.formulaire)
-            if structure_id == "invalide":
-                return page_utilisateurs(ctx, erreur="La structure n’est pas dans l’arbre.")
+        structure_id = _structure_compte(conn, ctx.formulaire)
+        if structure_id == "invalide":
+            return page_utilisateurs(ctx, erreur="La direction n’est pas dans l’arbre.")
+        if fonction in NIVEAUX_DIRECTION and not structure_id:
+            return page_utilisateurs(ctx, erreur="Choisissez la direction rattachée.")
         conn.execute(
             """
             INSERT INTO utilisateur (
@@ -368,6 +379,31 @@ def action_utilisateur(ctx):
             (ident, nom, hasher(mot), admin, fonction, structure_id, maintenant()),
         )
     return Redirection("/utilisateurs?message=utilisateur-cree")
+
+
+def _options_directions(structures):
+    groupes = []
+    domaine = None
+    options = []
+
+    def fermer():
+        if domaine is not None:
+            groupes.append(
+                f'<optgroup label="{echapper(domaine)}">{"".join(options)}</optgroup>'
+            )
+
+    for structure in structures:
+        if structure["domaine"] != domaine:
+            fermer()
+            domaine = structure["domaine"]
+            options = []
+        complement = f" — {structure['intitule']}" if structure["intitule"] else ""
+        options.append(
+            f'<option value="{int(structure["id"])}">'
+            f'{echapper(structure["nom"] + complement)}</option>'
+        )
+    fermer()
+    return "".join(groupes)
 
 
 def _role(personne):

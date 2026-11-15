@@ -513,6 +513,37 @@ def parcours(hote, numero):
     verifie("Note de suivi" in dossier and "Texte de la note de test." in dossier, "note ajoutée")
 
     _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
+    niveaux = re.search(r'id="niveau".*?</select>', page_users, re.S).group(0)
+    ordre = [valeur for valeur in re.findall(r'<option value="([^"]*)">', niveaux) if valeur]
+    verifie(
+        ordre[:8]
+        == [
+            "ministre",
+            "secretaire_general",
+            "chef_cabinet",
+            "directeur",
+            "directeur_adjoint",
+            "chef_division",
+            "chef_section",
+            "charge_etudes",
+        ],
+        "chaîne des niveaux",
+    )
+    verifie("Secrétaire général" in page_users and "Chargé d’études" in page_users, "libellés des niveaux")
+    verifie("Direction rattachée" in page_users and 'label="Assainissement"' in page_users, "directions groupées")
+    verifie("Nouveau compte" in page_users, "écran de création")
+    _, _, sans_direction, _ = admin.appel(
+        "POST",
+        "/utilisateurs",
+        {
+            "identifiant": "dir-sans",
+            "nom": "Directeur sans direction",
+            "mot_de_passe": "directeur-2026",
+            "fonction": "directeur",
+            "jeton": jeton(page_users),
+        },
+    )
+    verifie("Choisissez la direction rattachée" in sans_direction, "la direction est exigée")
     admin.appel(
         "POST",
         "/utilisateurs",
@@ -548,6 +579,51 @@ def parcours(hote, numero):
             "structure_id": anasp.group(1),
             "jeton": jeton(page_users),
         },
+    )
+    _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
+    admin.appel(
+        "POST",
+        "/utilisateurs",
+        {
+            "identifiant": "directeur-anasp",
+            "nom": "Directeur de l’ANASP",
+            "mot_de_passe": "directeur-2026",
+            "fonction": "directeur",
+            "structure_id": anasp.group(1),
+            "jeton": jeton(page_users),
+        },
+    )
+    _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
+    admin.appel(
+        "POST",
+        "/utilisateurs",
+        {
+            "identifiant": "ministre",
+            "nom": "Le ministre",
+            "mot_de_passe": "ministre-2026x",
+            "fonction": "ministre",
+            "jeton": jeton(page_users),
+        },
+    )
+    directeur = Client(hote, numero)
+    _, _, formulaire, _ = directeur.appel("GET", "/connexion")
+    _, _, accueil_directeur, _ = directeur.appel(
+        "POST",
+        "/connexion",
+        {"identifiant": "directeur-anasp", "mot_de_passe": "directeur-2026", "jeton": jeton(formulaire)},
+    )
+    verifie(_menu_contient(accueil_directeur, ("/directions", "/ordures")), "le directeur voit sa direction")
+    verifie("/eau/seg" not in _nav(accueil_directeur) and "/eau/snape" not in _nav(accueil_directeur), "le directeur ne voit pas l’eau")
+    ministre = Client(hote, numero)
+    _, _, formulaire, _ = ministre.appel("GET", "/connexion")
+    _, _, accueil_ministre, _ = ministre.appel(
+        "POST",
+        "/connexion",
+        {"identifiant": "ministre", "mot_de_passe": "ministre-2026x", "jeton": jeton(formulaire)},
+    )
+    verifie(
+        _menu_contient(accueil_ministre, ("/directions", "/bsd", "/ordures", "/eau/seg", "/eau/snape")),
+        "le ministre voit tout le ministère",
     )
     _, _, saisie, _ = admin.appel("GET", "/bsd/saisie")
     _, chemin, _, _ = admin.appel(

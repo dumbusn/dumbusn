@@ -2,7 +2,7 @@
 
 Socle local de l’application unique du Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures, République de Guinée.
 
-Les quatre blocs sont en service : la gestion documentaire des directions, le tableau de bord du BSD, la collecte des ordures, et l’eau (SEG en ville, SNAPE en zone rurale). Une page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions. Le ministre, le secrétaire général, le chef de cabinet et le BSD ont l’accès complet. Une direction ne voit que ce qui la concerne.
+Les quatre blocs sont en service : la gestion documentaire des directions, le tableau de bord du BSD, la collecte des ordures, et l’eau (SEG en ville, SNAPE en zone rurale). Une page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions. Le ministre, le secrétaire général, le chef de cabinet et le BSD ont l’accès complet. À partir du directeur, le compte ne voit que sa direction.
 
 Les dix-huit projets chargés au premier lancement sont un **exemple fictif**, repris d’un classeur de démonstration. Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.
 

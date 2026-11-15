@@ -1,14 +1,22 @@
-"""Privilèges. La hiérarchie voit tout. Une direction ne voit que ce qui la concerne. Les groupes complètent."""
+"""Privilèges. Le haut de la chaîne voit tout. À partir du directeur, le compte ne voit que sa direction."""
 
 from mahh.reponse import Interdit, NonConnecte
 
 ACTIONS = ("creer", "consulter", "modifier", "supprimer")
-FONCTIONS = {
-    "ministre": "Ministre",
-    "chef_cabinet": "Chef de cabinet",
-    "secretaire_general": "Secrétaire général",
-    "bsd": "BSD",
-}
+NIVEAUX = (
+    ("ministre", "Ministre"),
+    ("secretaire_general", "Secrétaire général"),
+    ("chef_cabinet", "Chef de cabinet"),
+    ("directeur", "Directeur"),
+    ("directeur_adjoint", "Directeur adjoint"),
+    ("chef_division", "Chef de division"),
+    ("chef_section", "Chef de section"),
+    ("charge_etudes", "Chargé d’études"),
+)
+ACCES_COMPLET = ("ministre", "secretaire_general", "chef_cabinet", "bsd")
+NIVEAUX_DIRECTION = tuple(cle for cle, _libelle in NIVEAUX if cle not in ACCES_COMPLET)
+FONCTIONS = dict(NIVEAUX)
+FONCTIONS["bsd"] = "BSD"
 FONCTION_COMMUNICATION = "communication"
 
 
@@ -36,7 +44,7 @@ def est_hierarchie(utilisateur):
         return False
     if utilisateur["administrateur"]:
         return True
-    return (utilisateur["fonction"] or "") in FONCTIONS
+    return (utilisateur["fonction"] or "") in ACCES_COMPLET
 
 
 def peut_gerer_vitrine(utilisateur):
