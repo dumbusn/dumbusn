@@ -4,9 +4,9 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from secrets import token_hex
 
 from mahh.db import base
-from mahh.droits import exiger_connexion
+from mahh.droits import exiger_connexion, peut_voir_ordures
 from mahh.presentation import jeton_cache, page
-from mahh.reponse import Redirection, ValeurRefusee
+from mahh.reponse import Interdit, Redirection, ValeurRefusee
 from mahh.securite import maintenant
 from mahh.texte import echapper
 from mahh.validation import ligne
@@ -27,7 +27,15 @@ BANDEAU = (
 )
 
 
+def _garder(ctx):
+    exiger_connexion(ctx)
+    with base() as conn:
+        if not peut_voir_ordures(conn, ctx.utilisateur):
+            raise Interdit("La collecte concerne l’ANASP, la hiérarchie et le BSD.")
+
+
 def page_module(ctx):
+    _garder(ctx)
     with base() as conn:
         nombre = conn.execute("SELECT COUNT(*) AS n FROM abonnement").fetchone()["n"]
         exemples = conn.execute(
@@ -59,6 +67,7 @@ def page_module(ctx):
 
 
 def page_abonnement(ctx, erreur=None, valeurs=None):
+    _garder(ctx)
     valeurs = valeurs or {}
     with base() as conn:
         options = _options_secteurs(conn, valeurs.get("secteur_id"))
@@ -90,6 +99,7 @@ def page_abonnement(ctx, erreur=None, valeurs=None):
 
 
 def action_abonnement(ctx):
+    _garder(ctx)
     try:
         nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom")
         telephone = _telephone(ctx.formulaire.get("telephone"))
@@ -129,6 +139,7 @@ def action_abonnement(ctx):
 
 
 def page_fiche(ctx, reference, erreur=None):
+    _garder(ctx)
     with base() as conn:
         abonne = _abonne(conn, reference)
         if abonne is None:
@@ -174,6 +185,7 @@ def page_fiche(ctx, reference, erreur=None):
 
 
 def action_payer(ctx, reference):
+    _garder(ctx)
     with base() as conn:
         abonne = _abonne(conn, reference)
         if abonne is None:
@@ -183,6 +195,7 @@ def action_payer(ctx, reference):
 
 
 def action_signalement(ctx, reference):
+    _garder(ctx)
     with base() as conn:
         abonne = _abonne(conn, reference)
         if abonne is None:
@@ -203,7 +216,7 @@ def action_signalement(ctx, reference):
 
 
 def action_passage(ctx, reference):
-    exiger_connexion(ctx)
+    _garder(ctx)
     try:
         agent = ligne(ctx.formulaire.get("agent"), 2, 80, "Agent")
         latitude = _coordonnee(ctx.formulaire.get("latitude"), Decimal("-90"), Decimal("90"), "Latitude")
@@ -226,6 +239,7 @@ def action_passage(ctx, reference):
 
 
 def action_chercher(ctx):
+    _garder(ctx)
     reference = (ctx.formulaire.get("reference") or "").strip().upper()
     if not reference:
         return page_module(ctx)
@@ -233,7 +247,7 @@ def action_chercher(ctx):
 
 
 def page_pme(ctx, erreur=None):
-    exiger_connexion(ctx)
+    _garder(ctx)
     jour = ctx.aujourd_hui.isoformat()
     with base() as conn:
         pmes = conn.execute("SELECT * FROM pme ORDER BY nom").fetchall()
@@ -275,7 +289,7 @@ def page_pme(ctx, erreur=None):
 
 
 def action_suivi(ctx):
-    exiger_connexion(ctx)
+    _garder(ctx)
     try:
         pme_id = int(ctx.formulaire.get("pme_id") or "0")
         genre = ctx.formulaire.get("genre") or ""
@@ -312,7 +326,7 @@ def action_suivi(ctx):
 
 
 def page_points(ctx):
-    exiger_connexion(ctx)
+    _garder(ctx)
     with base() as conn:
         points = conn.execute("SELECT * FROM point_collecte ORDER BY nom").fetchall()
         lignes = []
@@ -341,7 +355,7 @@ def page_points(ctx):
 
 
 def page_abonnes(ctx):
-    exiger_connexion(ctx)
+    _garder(ctx)
     with base() as conn:
         lignes = conn.execute(
             "SELECT reference, nom, paye, exemple FROM abonnement ORDER BY reference"
@@ -365,6 +379,7 @@ def page_abonnes(ctx):
 
 
 def page_prevu(ctx):
+    _garder(ctx)
     return Redirection("/ordures")
 
 

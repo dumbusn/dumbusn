@@ -1,6 +1,14 @@
 """Accueil, connexion, et pages des blocs qui ne sont pas encore construits."""
 
 from mahh.db import base
+from mahh.droits import (
+    peut_voir_bsd,
+    peut_voir_directions,
+    peut_voir_instructions,
+    peut_voir_ordures,
+    peut_voir_seg,
+    peut_voir_snape,
+)
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Redirection
 from mahh.securite import (
@@ -18,44 +26,19 @@ from mahh.texte import echapper
 
 def accueil(ctx):
     if ctx.utilisateur is None:
-        entree = (
-            '<p><a class="bouton" href="/connexion">Se connecter</a></p>'
-            "<p>Après la connexion, cette page reste la première.</p>"
+        return Redirection("/connexion")
+    with base() as conn:
+        cartes = _cartes(conn, ctx.utilisateur)
+        instructions = peut_voir_instructions(ctx.utilisateur)
+    blocs = ""
+    if cartes:
+        blocs = (
+            "<h2>Entrées ouvertes à votre compte</h2>"
+            f'<div class="cartes">{"".join(cartes)}</div>'
         )
-    else:
-        entree = ""
-    corps = entree + """
-    <h1>Accueil</h1>
-    <p class="chapeau">Première page après la connexion. Quatre blocs, puis la page d’instructions.</p>
-    <p class="bandeau bandeau-exemple" data-accueil="exemples">Les projets affichés sont des exemples fictifs.
-    Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.</p>
-    <h2>Les quatre blocs</h2>
-    <div class="cartes">
-      <article class="carte" data-bloc="directions">
-        <p class="etat etat-ouvert">En service</p>
-        <h2>Directions et dossiers</h2>
-        <p>Dossiers et fichiers de toutes les directions, dans l’arbre de la note.</p>
-        <a class="bouton" href="/directions">Ouvrir les directions</a>
-      </article>
-      <article class="carte" data-bloc="bsd">
-        <p class="etat etat-ouvert">En service</p>
-        <h2>Tableau du BSD</h2>
-        <p>Suivi des projets. Le code d’un projet ouvre son dossier.</p>
-        <a class="bouton" href="/bsd">Ouvrir le tableau de bord</a>
-      </article>
-      <article class="carte" data-bloc="ordures">
-        <p class="etat etat-ouvert">En service</p>
-        <h2>Collecte des ordures</h2>
-        <p>Abonnement, paiement, tournées et signalement. Le jeu chargé au départ est un exemple fictif.</p>
-        <a class="bouton" href="/ordures">Ouvrir la collecte</a>
-      </article>
-      <article class="carte" data-bloc="eau">
-        <p class="etat etat-ouvert">En service</p>
-        <h2>SEG et SNAPE</h2>
-        <p>SEG en ville, SNAPE en zone rurale. Demande, abonnement et tableaux. Le jeu chargé est un exemple fictif.</p>
-        <a class="bouton" href="/eau">Ouvrir l’eau</a>
-      </article>
-    </div>
+    bloc_instructions = ""
+    if instructions:
+        bloc_instructions = """
     <h2>Instructions</h2>
     <article class="carte" data-bloc="instructions">
       <p>Page destinée aux écrans du ministère : du ministre au chef de cabinet,
@@ -63,7 +46,75 @@ def accueil(ctx):
       <a class="bouton" href="/instructions">Ouvrir les instructions</a>
     </article>
     """
+    corps = f"""
+    <h1>Accueil</h1>
+    <p class="chapeau">Première page après la connexion. Seules les entrées de votre compte sont affichées.</p>
+    <p class="bandeau bandeau-exemple" data-accueil="exemples">Les projets affichés sont des exemples fictifs.
+    Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.</p>
+    {blocs}
+    {bloc_instructions}
+    """
     return page("Accueil", corps, ctx, actif="accueil")
+
+
+def _cartes(conn, utilisateur):
+    cartes = []
+    if peut_voir_directions(conn, utilisateur):
+        cartes.append(
+            """
+      <article class="carte" data-bloc="directions">
+        <p class="etat etat-ouvert">En service</p>
+        <h2>Directions et dossiers</h2>
+        <p>Dossiers et fichiers ouverts à votre compte, dans l’arbre de la note.</p>
+        <a class="bouton" href="/directions">Ouvrir les directions</a>
+      </article>
+            """
+        )
+    if peut_voir_bsd(conn, utilisateur):
+        cartes.append(
+            """
+      <article class="carte" data-bloc="bsd">
+        <p class="etat etat-ouvert">En service</p>
+        <h2>Tableau du BSD</h2>
+        <p>Suivi des projets qui vous concernent. Le code d’un projet ouvre son dossier.</p>
+        <a class="bouton" href="/bsd">Ouvrir le tableau de bord</a>
+      </article>
+            """
+        )
+    if peut_voir_ordures(conn, utilisateur):
+        cartes.append(
+            """
+      <article class="carte" data-bloc="ordures">
+        <p class="etat etat-ouvert">En service</p>
+        <h2>Collecte des ordures</h2>
+        <p>Abonnement, paiement, tournées et signalement. Le jeu chargé au départ est un exemple fictif.</p>
+        <a class="bouton" href="/ordures">Ouvrir la collecte</a>
+      </article>
+            """
+        )
+    if peut_voir_seg(conn, utilisateur):
+        cartes.append(
+            """
+      <article class="carte" data-bloc="seg">
+        <p class="etat etat-ouvert">En service</p>
+        <h2>SEG</h2>
+        <p>Distribution d’eau en ville. Demande, abonnement et tableau. Le jeu chargé est un exemple fictif.</p>
+        <a class="bouton" href="/eau/seg">Ouvrir le SEG</a>
+      </article>
+            """
+        )
+    if peut_voir_snape(conn, utilisateur):
+        cartes.append(
+            """
+      <article class="carte" data-bloc="snape">
+        <p class="etat etat-ouvert">En service</p>
+        <h2>SNAPE</h2>
+        <p>Forages en zone rurale. Demande, abonnement et tableau. Le jeu chargé est un exemple fictif.</p>
+        <a class="bouton" href="/eau/snape">Ouvrir le SNAPE</a>
+      </article>
+            """
+        )
+    return cartes
 
 
 def page_connexion(ctx, erreur=None, statut=200):

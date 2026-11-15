@@ -247,6 +247,14 @@ class Gestionnaire(BaseHTTPRequestHandler):
         with base() as conn:
             ctx.utilisateur = utilisateur_par_jeton(conn, cookies.get("mahh_session"))
 
+        if ctx.utilisateur is None and not _sans_session(self.command, chemin):
+            suivant = chemin + (("?" + analyse.query) if analyse.query else "")
+            self._envoyer(
+                Redirection("/connexion?suivant=" + _chemin_suivant(suivant)),
+                ctx.cookies,
+            )
+            return
+
         resultat = None
         try:
             for methode, motif, fonction in ROUTES:
@@ -314,6 +322,14 @@ def _cookies(en_tete):
         except CookieError:
             return {}
     return {cle: morsel.value for cle, morsel in pot.items()}
+
+
+def _sans_session(methode, chemin):
+    return (methode, chemin) in {
+        ("GET", "/connexion"),
+        ("POST", "/connexion"),
+        ("POST", "/deconnexion"),
+    }
 
 
 def _chemin_suivant(chemin):

@@ -1,7 +1,7 @@
 """Page d’instructions, destinée aux écrans du ministère. Pas un texte juridique."""
 
 from mahh.db import base
-from mahh.droits import FONCTIONS, est_hierarchie, exiger_connexion
+from mahh.droits import FONCTIONS, est_hierarchie, exiger_connexion, peut_voir_instructions
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Interdit, Redirection, ValeurRefusee
 from mahh.securite import maintenant
@@ -24,6 +24,8 @@ ECRITURE = {
 
 def page_instructions(ctx, erreur=None):
     exiger_connexion(ctx)
+    if not peut_voir_instructions(ctx.utilisateur):
+        raise Interdit("Les instructions concernent la hiérarchie, le BSD, et les directions.")
     with base() as conn:
         instructions = _instructions_visibles(conn, ctx.utilisateur)
         sommations = _sommations_visibles(conn, ctx.utilisateur)

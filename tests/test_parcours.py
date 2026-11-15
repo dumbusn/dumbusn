@@ -151,12 +151,29 @@ def fichier_multipart(champs, nom_fichier, contenu):
     return b"".join(morceaux), f"multipart/form-data; boundary={borne}"
 
 
+def _nav(html):
+    trouve = re.search(r'<nav class="navigation">(.*?)</nav>', html, re.S)
+    return trouve.group(1) if trouve else ""
+
+
+def _menu_contient(html, hrefs):
+    nav = _nav(html)
+    return all(f'href="{href}"' in nav for href in hrefs)
+
+
 def parcours(hote, numero):
     admin = Client(hote, numero)
-    statut, _, page, _ = admin.appel("GET", "/", suivre=False)
-    verifie(statut == 200 and "<h1>Accueil</h1>" in page, "accueil sans session")
-    verifie("Directions et dossiers" in page and "Tableau du BSD" in page, "blocs visibles sans session")
-    verifie("Ouvrir les instructions" in page and "Les projets affichés sont des exemples" in page, "instructions et exemples sans session")
+    anonyme = Client(hote, numero)
+    statut, _, page, _ = anonyme.appel("GET", "/")
+    verifie(statut == 200 and "<h1>Connexion</h1>" in page and "<nav" not in page, "sans session, écran de connexion")
+    verifie("Directions" not in page and "Ordures" not in page and "Instructions" not in page, "aucun menu sans session")
+    for ferme in ("/directions", "/bsd", "/instructions", "/ordures", "/eau", "/eau/seg", "/eau/snape"):
+        statut, _, page, _ = anonyme.appel("GET", ferme)
+        verifie(statut == 200 and "<h1>Connexion</h1>" in page and "<nav" not in page, f"{ferme} fermé sans session")
+    statut, _, page, _ = anonyme.appel("GET", "/connexion")
+    verifie(statut == 200 and "<h1>Connexion</h1>" in page, "écran de connexion seul")
+    verifie("<nav" not in page, "pas de menu sur la connexion")
+    verifie("Tableau de bord" not in page and "SEG" not in page and "SNAPE" not in page, "pas d’entrées métier")
     statut, chemin, page, _ = admin.appel("GET", "/connexion")
     verifie(statut == 200, f"connexion {statut}")
     statut, chemin, page, _ = admin.appel(
@@ -166,12 +183,13 @@ def parcours(hote, numero):
     )
     verifie(statut == 200 and "<h1>Accueil</h1>" in page, "accueil après connexion")
     verifie("Directions et dossiers" in page and "Tableau du BSD" in page, "blocs en service")
-    verifie("Collecte des ordures" in page and "SEG et SNAPE" in page, "blocs à venir")
+    verifie("Collecte des ordures" in page and ">SEG<" in page and ">SNAPE<" in page, "blocs eau séparés")
     verifie("Ouvrir les instructions" in page, "accès aux instructions depuis l’accueil")
     verifie("Les projets affichés sont des exemples" in page, "rappel exemples")
     verifie("Pas construit" not in page, "les quatre blocs sont en service")
     verifie('href="/ordures"' in page and "Ouvrir la collecte" in page, "accueil ouvre la collecte")
-    verifie('href="/eau"' in page and "Ouvrir l’eau" in page, "accueil ouvre l’eau")
+    verifie('href="/eau/seg"' in page and 'href="/eau/snape"' in page, "accueil ouvre SEG et SNAPE")
+    verifie(_menu_contient(page, ("/directions", "/bsd", "/instructions", "/ordures", "/eau/seg", "/eau/snape")), "menu complet de la hiérarchie")
     _, _, ailleurs, _ = admin.appel("GET", "/bsd")
     verifie('class="nav nav-accueil"' in ailleurs, "accès accueil depuis le tableau")
     _, _, retour, _ = admin.appel("GET", "/")
@@ -368,6 +386,10 @@ def parcours(hote, numero):
     fichier_id = re.search(r'href="/fichier/(\d+)"', apres).group(1)
     statut, _, telecharge, _ = agent.appel("GET", f"/fichier/{fichier_id}")
     verifie(statut == 200 and telecharge == "Piece de demonstration", "téléchargement")
+    _, _, accueil_agent, _ = agent.appel("GET", "/")
+    verifie(_menu_contient(accueil_agent, ("/directions", "/bsd")), "menu de l’agent documentaire")
+    verifie("/ordures" not in _nav(accueil_agent) and "/eau/seg" not in _nav(accueil_agent), "l’agent ne voit pas ordures ni SEG")
+    verifie("/instructions" not in _nav(accueil_agent), "l’agent sans direction ne voit pas les instructions")
     _, _, bsd_agent, _ = agent.appel("GET", "/bsd")
     verifie(statut_ok(bsd_agent), "l'agent consulte le BSD")
     verifie("ASS-01" not in bsd_agent, "l'agent sans direction ne voit pas les projets")
@@ -382,8 +404,25 @@ def parcours(hote, numero):
     )
     statut, _, _, _ = visiteur.appel("GET", f"/fichier/{fichier_id}")
     verifie(statut == 403, "téléchargement refusé sans droit")
+    _, _, accueil_visiteur, _ = visiteur.appel("GET", "/")
+    verifie(
+        "/directions" not in _nav(accueil_visiteur)
+        and "/bsd" not in _nav(accueil_visiteur)
+        and "/ordures" not in _nav(accueil_visiteur)
+        and "/eau/" not in _nav(accueil_visiteur)
+        and "/instructions" not in _nav(accueil_visiteur),
+        "le visiteur n’a pas de menu métier",
+    )
+    verifie('href="/compte"' in _nav(accueil_visiteur) and 'href="/"' in _nav(accueil_visiteur), "accueil et compte seuls")
+    verifie('data-bloc="ordures"' not in accueil_visiteur and 'data-bloc="bsd"' not in accueil_visiteur, "pas de cartes")
     statut, _, page, _ = visiteur.appel("GET", "/bsd")
     verifie(statut == 403, "BSD refusé sans privilège")
+    statut, _, _, _ = visiteur.appel("GET", "/ordures")
+    verifie(statut == 403, "ordures refusées sans privilège")
+    statut, _, _, _ = visiteur.appel("GET", "/eau/seg")
+    verifie(statut == 403, "SEG refusé sans privilège")
+    statut, _, _, _ = visiteur.appel("GET", "/instructions")
+    verifie(statut == 403, "instructions refusées sans direction")
     _, _, anasp_visiteur, _ = visiteur.appel("GET", f"/noeud/{anasp.group(1)}")
     verifie("Dossier ouvert" not in anasp_visiteur, "le visiteur ne voit pas le dossier")
 
@@ -480,6 +519,10 @@ def parcours(hote, numero):
         "/connexion",
         {"identifiant": "anasp", "mot_de_passe": "anasp-socle-2026", "jeton": jeton(page)},
     )
+    _, _, accueil_direction, _ = direction.appel("GET", "/")
+    verifie(_menu_contient(accueil_direction, ("/directions", "/bsd", "/instructions", "/ordures")), "menu ANASP")
+    verifie("/eau/seg" not in _nav(accueil_direction) and "/eau/snape" not in _nav(accueil_direction), "ANASP sans SEG ni SNAPE")
+    verifie('data-bloc="seg"' not in accueil_direction and 'data-bloc="snape"' not in accueil_direction, "cartes eau cachées")
     _, _, vue, _ = direction.appel("GET", "/bsd")
     verifie("TEST-02" in vue and "ASS-01" not in vue, "la direction ne voit que son projet")
     verifie(indiquer(vue, "projets") == "1", "un seul projet pour la direction")
@@ -539,16 +582,20 @@ def parcours(hote, numero):
 
 def parcours_ordures(admin, hote, numero):
     public = Client(hote, numero)
-    statut, _, page, _ = public.appel("GET", "/ordures", suivre=False)
-    verifie(statut == 200 and "<h1>Collecte des ordures</h1>" in page, "module ordures public")
+    statut, _, _, _ = public.appel("GET", "/ordures", suivre=False)
+    verifie(statut in (302, 303), "ordures fermé sans session")
+    statut, _, _, _ = public.appel("GET", "/ordures/abonnement", suivre=False)
+    verifie(statut in (302, 303), "abonnement fermé sans session")
+    _, _, page, _ = admin.appel("GET", "/ordures")
+    verifie("<h1>Collecte des ordures</h1>" in page, "module ordures pour l’ANASP et la hiérarchie")
     verifie("ne sont pas ceux du ministère" in page, "bannière exemple ordures")
     verifie("S’abonner" in page, "abonnement en ligne")
-    _, _, formulaire, _ = public.appel("GET", "/ordures/abonnement")
+    _, _, formulaire, _ = admin.appel("GET", "/ordures/abonnement")
     option = re.search(r'<option value="(\d+)">([^<]*Secteur A)</option>', formulaire)
     verifie(option is not None, "chaîne de rattachement")
     verifie("Région exemple" in option.group(2) and "Préfecture exemple" in option.group(2), "région et préfecture")
     verifie("Commune exemple" in option.group(2) and "Quartier Nord" in option.group(2), "commune et quartier")
-    _, chemin, fiche, _ = public.appel(
+    _, chemin, fiche, _ = admin.appel(
         "POST",
         "/ordures/abonnement",
         {
@@ -566,20 +613,20 @@ def parcours_ordures(admin, hote, numero):
     verifie("mardi" in fiche and "620 00 00 01" in fiche, "jours et contact communiqués")
     verifie('data-paye="0"' in fiche, "paiement encore ouvert")
     reference = chemin.rstrip("/").split("/")[-1].split("?")[0]
-    _, _, fiche, _ = public.appel(
+    _, _, fiche, _ = admin.appel(
         "POST",
         f"/ordures/a/{reference}/payer",
         {"jeton": jeton(fiche)},
     )
     verifie('data-paye="1"' in fiche, "paiement enregistré")
-    _, _, fiche, _ = public.appel(
+    _, _, fiche, _ = admin.appel(
         "POST",
         f"/ordures/a/{reference}/signalement",
         {"jeton": jeton(fiche)},
     )
     verifie("poubelle pleine" in fiche.lower() or "Poubelle pleine" in fiche or "data-hors-jour" in fiche, "signalement")
     verifie('data-hors-jour="' in fiche, "hors jour indiqué")
-    _, _, exemple, _ = public.appel("GET", "/ordures/a/ORD-EX-01")
+    _, _, exemple, _ = admin.appel("GET", "/ordures/a/ORD-EX-01")
     verifie('data-genre="exemple"' in exemple and "Aïssatou Bah" in exemple, "exemple et agent")
     statut, _, _, _ = public.appel("GET", "/ordures/pme", suivre=False)
     verifie(statut in (302, 303), "le suivi PME demande un compte")
@@ -609,8 +656,12 @@ def parcours_ordures(admin, hote, numero):
 
 def parcours_eau(admin, hote, numero):
     public = Client(hote, numero)
-    statut, _, page, _ = public.appel("GET", "/eau", suivre=False)
-    verifie(statut == 200 and "SEG" in page and "SNAPE" in page, "module eau public")
+    statut, _, _, _ = public.appel("GET", "/eau", suivre=False)
+    verifie(statut in (302, 303), "eau fermé sans session")
+    statut, _, _, _ = public.appel("GET", "/eau/demande", suivre=False)
+    verifie(statut in (302, 303), "demande d’eau fermée sans session")
+    _, _, page, _ = admin.appel("GET", "/eau")
+    verifie("SEG" in page and "SNAPE" in page, "module eau pour la hiérarchie")
     verifie("ne sont pas ceux du ministère" in page, "bannière exemple eau")
     _, _, seg, _ = admin.appel("GET", "/eau/seg")
     verifie('data-abonnes="5"' in seg and 'data-taux-abonnement="33.3"' in seg, "taux d’abonnement SEG")
@@ -661,27 +712,42 @@ def parcours_eau(admin, hote, numero):
         return client
 
     seg_compte = compte("segville", "seg-eau-2026")
+    _, _, accueil_seg, _ = seg_compte.appel("GET", "/")
+    verifie(_menu_contient(accueil_seg, ("/directions", "/bsd", "/instructions", "/eau/seg")), "menu du SEG")
+    verifie("/ordures" not in _nav(accueil_seg) and "/eau/snape" not in _nav(accueil_seg), "SEG sans ordures ni SNAPE")
+    statut, _, _, _ = seg_compte.appel("GET", "/ordures")
+    verifie(statut == 403, "le SEG ne voit pas la collecte")
     statut, _, page, _ = seg_compte.appel("GET", "/eau/seg")
     verifie(statut == 200 and "Ville Alpha" in page, "le SEG voit son tableau")
     statut, _, _, _ = seg_compte.appel("GET", "/eau/snape")
     verifie(statut == 403, "le SEG ne voit pas le SNAPE")
     snape_compte = compte("snaperural", "snape-eau-2026")
+    _, _, accueil_snape, _ = snape_compte.appel("GET", "/")
+    verifie("/eau/snape" in _nav(accueil_snape) and "/eau/seg" not in _nav(accueil_snape), "menu du SNAPE")
+    verifie("/ordures" not in _nav(accueil_snape), "SNAPE sans ordures")
     statut, _, page, _ = snape_compte.appel("GET", "/eau/snape")
     verifie(statut == 200 and "Village Nord" in page, "le SNAPE voit son tableau")
     statut, _, _, _ = snape_compte.appel("GET", "/eau/seg")
     verifie(statut == 403, "le SNAPE ne voit pas le SEG")
     autre = compte("anaspvue", "anasp-eau-2026")
+    _, _, accueil_anasp, _ = autre.appel("GET", "/")
+    verifie("/ordures" in _nav(accueil_anasp) and "/eau/seg" not in _nav(accueil_anasp), "menu ANASP sans SEG")
     statut, _, _, _ = autre.appel("GET", "/eau/seg")
     verifie(statut == 403, "une autre direction ne voit pas le SEG")
     bsd = compte("bsdeau", "bsd-eau-2026xx")
+    _, _, accueil_bsd, _ = bsd.appel("GET", "/")
+    verifie(
+        _menu_contient(accueil_bsd, ("/directions", "/bsd", "/instructions", "/ordures", "/eau/seg", "/eau/snape")),
+        "le BSD voit tout le menu",
+    )
     statut_seg, _, _, _ = bsd.appel("GET", "/eau/seg")
     statut_snape, _, _, _ = bsd.appel("GET", "/eau/snape")
     verifie(statut_seg == 200 and statut_snape == 200, "le BSD voit les deux tableaux")
 
-    _, _, formulaire, _ = public.appel("GET", "/eau/demande")
+    _, _, formulaire, _ = admin.appel("GET", "/eau/demande")
     lieu = re.search(r'<option value="(\d+)">Ville Alpha</option>', formulaire)
     verifie(lieu is not None, "ville SEG proposée")
-    _, chemin, fiche, _ = public.appel(
+    _, chemin, fiche, _ = admin.appel(
         "POST",
         "/eau/demande",
         {
@@ -695,14 +761,14 @@ def parcours_eau(admin, hote, numero):
     )
     verifie("/eau/d/EAU-" in chemin and "Ville Alpha" in fiche and "9.652000" in fiche, "demande SEG")
     reference = chemin.rstrip("/").split("/")[-1].split("?")[0]
-    _, chemin, fiche, _ = public.appel(
+    _, chemin, fiche, _ = admin.appel(
         "POST",
         f"/eau/d/{reference}/abonner",
         {"jeton": jeton(fiche)},
     )
     verifie("/eau/a/EAU-" in chemin and 'data-paye="0"' in fiche, "abonnement ouvert")
     reference_abonnement = chemin.rstrip("/").split("/")[-1].split("?")[0]
-    _, _, fiche, _ = public.appel(
+    _, _, fiche, _ = admin.appel(
         "POST",
         f"/eau/a/{reference_abonnement}/payer",
         {"jeton": jeton(fiche)},

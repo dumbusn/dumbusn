@@ -119,6 +119,87 @@ def peut_voir_bsd(conn, utilisateur):
     return ligne is not None
 
 
+def peut_voir_directions(conn, utilisateur):
+    if utilisateur is None:
+        return False
+    if est_hierarchie(utilisateur) or utilisateur["structure_id"]:
+        return True
+    ligne = conn.execute(
+        """
+        SELECT 1 FROM appartenance a
+        JOIN droit d ON d.groupe_id = a.groupe_id
+        WHERE a.utilisateur_id = ?
+          AND (d.creer = 1 OR d.consulter = 1 OR d.modifier = 1 OR d.supprimer = 1)
+        """,
+        (utilisateur["id"],),
+    ).fetchone()
+    return ligne is not None
+
+
+def peut_voir_instructions(utilisateur):
+    if not utilisateur:
+        return False
+    return est_hierarchie(utilisateur) or bool(utilisateur["structure_id"])
+
+
+def nom_structure(conn, utilisateur):
+    if not utilisateur or not utilisateur["structure_id"]:
+        return ""
+    ligne = conn.execute(
+        "SELECT nom FROM noeud WHERE id = ?",
+        (utilisateur["structure_id"],),
+    ).fetchone()
+    return ligne["nom"] if ligne else ""
+
+
+def peut_voir_ordures(conn, utilisateur):
+    if utilisateur is None:
+        return False
+    if est_hierarchie(utilisateur):
+        return True
+    return nom_structure(conn, utilisateur) == "ANASP"
+
+
+def peut_voir_reseau(conn, utilisateur, reseau):
+    if utilisateur is None:
+        return False
+    if est_hierarchie(utilisateur):
+        return True
+    attendu = "SEG" if reseau == "seg" else "SNAPE"
+    return nom_structure(conn, utilisateur) == attendu
+
+
+def peut_voir_seg(conn, utilisateur):
+    return peut_voir_reseau(conn, utilisateur, "seg")
+
+
+def peut_voir_snape(conn, utilisateur):
+    return peut_voir_reseau(conn, utilisateur, "snape")
+
+
+def entrees_menu(conn, utilisateur):
+    if utilisateur is None:
+        return []
+    entrees = [("/", "Accueil", "accueil")]
+    if peut_voir_directions(conn, utilisateur):
+        entrees.append(("/directions", "Directions", "directions"))
+    if peut_voir_bsd(conn, utilisateur):
+        entrees.append(("/bsd", "Tableau de bord", "bsd"))
+    if peut_voir_instructions(utilisateur):
+        entrees.append(("/instructions", "Instructions", "instructions"))
+    if peut_voir_ordures(conn, utilisateur):
+        entrees.append(("/ordures", "Ordures", "ordures"))
+    if peut_voir_seg(conn, utilisateur):
+        entrees.append(("/eau/seg", "SEG", "seg"))
+    if peut_voir_snape(conn, utilisateur):
+        entrees.append(("/eau/snape", "SNAPE", "snape"))
+    if utilisateur["administrateur"]:
+        entrees.append(("/groupes", "Groupes", "groupes"))
+        entrees.append(("/utilisateurs", "Utilisateurs", "utilisateurs"))
+    entrees.append(("/compte", "Compte", "compte"))
+    return entrees
+
+
 def exiger_bsd(ctx, conn):
     exiger_connexion(ctx)
     if not peut_voir_bsd(conn, ctx.utilisateur):

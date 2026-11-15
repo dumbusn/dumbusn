@@ -53,22 +53,11 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
         navigation = ""
         session = ""
     else:
-        liens = [
-            ("/", "Accueil", "accueil"),
-            ("/directions", "Directions", "directions"),
-            ("/bsd", "Tableau de bord", "bsd"),
-            ("/instructions", "Instructions", "instructions"),
-            ("/ordures", "Ordures", "ordures"),
-            ("/eau", "Eau", "eau"),
-        ]
-        if utilisateur["administrateur"]:
-            liens.extend(
-                (
-                    ("/groupes", "Groupes", "groupes"),
-                    ("/utilisateurs", "Utilisateurs", "utilisateurs"),
-                )
-            )
-        liens.append(("/compte", "Compte", "compte"))
+        from mahh.db import base
+        from mahh.droits import entrees_menu
+
+        with base() as conn:
+            liens = entrees_menu(conn, utilisateur)
         elements = []
         for href, libelle, cle in liens:
             classe = " nav-accueil" if cle == "accueil" else ""

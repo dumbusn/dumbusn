@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from secrets import token_hex
 
 from mahh.db import base
-from mahh.droits import est_hierarchie, exiger_connexion
+from mahh.droits import exiger_connexion, peut_voir_reseau, peut_voir_seg, peut_voir_snape
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Interdit, Redirection, ValeurRefusee
 from mahh.securite import maintenant
@@ -19,24 +19,40 @@ BANDEAU = (
 
 
 def page_module(ctx):
+    exiger_connexion(ctx)
+    with base() as conn:
+        voit_seg = peut_voir_seg(conn, ctx.utilisateur)
+        voit_snape = peut_voir_snape(conn, ctx.utilisateur)
+    if not voit_seg and not voit_snape:
+        raise Interdit("Cette structure ne voit que ce qui la concerne.")
+    tableaux = []
+    if voit_seg:
+        tableaux.append('<a class="bouton" href="/eau/seg">Tableau du SEG</a>')
+    if voit_snape:
+        tableaux.append('<a class="bouton secondaire" href="/eau/snape">Tableau du SNAPE</a>')
     corps = (
         _fil()
         + "<h1>Eau : SEG et SNAPE</h1>"
         + _bandeau()
         + "<p class=\"chapeau\">SEG : distribution d’eau en ville. SNAPE : forages en zone rurale. "
-        "La demande et l’abonnement sont ouverts. Les tableaux sont visibles par la hiérarchie, "
-        "le BSD, et par la structure concernée.</p>"
+        "Seuls les réseaux ouverts à votre compte sont affichés.</p>"
         + '<p><a class="bouton" href="/eau/demande">Déposer une demande</a></p>'
-        + '<p><a class="bouton" href="/eau/seg">Tableau du SEG</a> '
-        + '<a class="bouton secondaire" href="/eau/snape">Tableau du SNAPE</a></p>'
+        + "<p>" + " ".join(tableaux) + "</p>"
     )
-    return page("Eau", corps, ctx, actif="eau")
+    actif = "seg" if voit_seg and not voit_snape else "snape" if voit_snape and not voit_seg else "eau"
+    return page("Eau", corps, ctx, actif=actif)
 
 
 def page_demande(ctx, erreur=None, valeurs=None):
+    exiger_connexion(ctx)
     valeurs = valeurs or {}
     with base() as conn:
-        options = _options_lieux(conn, valeurs.get("lieu_id"))
+        if not peut_voir_seg(conn, ctx.utilisateur) and not peut_voir_snape(conn, ctx.utilisateur):
+            raise Interdit("Cette structure ne voit que ce qui la concerne.")
+        options = _options_lieux(conn, ctx.utilisateur, valeurs.get("lieu_id"))
+        voit_seg = peut_voir_seg(conn, ctx.utilisateur)
+        voit_snape = peut_voir_snape(conn, ctx.utilisateur)
+        actif = "seg" if voit_seg and not voit_snape else "snape" if voit_snape and not voit_seg else "eau"
     corps = (
         _fil()
         + "<h1>Demande d’eau</h1>"
@@ -57,10 +73,11 @@ def page_demande(ctx, erreur=None, valeurs=None):
         + f'<input id="longitude" name="longitude" required inputmode="decimal" value="{echapper(valeurs.get("longitude", ""))}">'
         + '<button type="submit">Enregistrer la demande</button></form>'
     )
-    return page("Demande d’eau", corps, ctx, actif="eau", erreur=erreur)
+    return page("Demande d’eau", corps, ctx, actif=actif, erreur=erreur)
 
 
 def action_demande(ctx):
+    exiger_connexion(ctx)
     try:
         nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom")
         telephone = _telephone(ctx.formulaire.get("telephone"))
@@ -74,6 +91,8 @@ def action_demande(ctx):
         lieu = conn.execute("SELECT * FROM eau_lieu WHERE id = ?", (lieu_id,)).fetchone()
         if lieu is None:
             return page_demande(ctx, erreur="Le lieu n’est pas reconnu.", valeurs=ctx.formulaire)
+        if not peut_voir_reseau(conn, ctx.utilisateur, lieu["reseau"]):
+            raise Interdit("Cette structure ne voit que ce qui la concerne.")
         reference = "EAU-" + token_hex(3).upper()
         conn.execute(
             """
@@ -87,11 +106,12 @@ def action_demande(ctx):
 
 
 def page_demande_fiche(ctx, reference, erreur=None):
+    exiger_connexion(ctx)
     with base() as conn:
         demande = _demande(conn, reference)
         if demande is None:
             return page("Introuvable", "<h1>Introuvable</h1>", ctx, statut=404)
-        if ctx.utilisateur is not None and not _peut_voir(ctx, conn, demande["reseau"]):
+        if not _peut_voir(ctx, conn, demande["reseau"]):
             raise Interdit("Cette structure ne voit que ce qui la concerne.")
         lieu = conn.execute("SELECT * FROM eau_lieu WHERE id = ?", (demande["lieu_id"],)).fetchone()
         abonnement = conn.execute(
@@ -106,15 +126,16 @@ def page_demande_fiche(ctx, reference, erreur=None):
         + _identite(demande, lieu)
         + _suite_abonnement(ctx, demande, abonnement)
     )
-    return page(demande["reference"], corps, ctx, actif="eau", erreur=erreur)
+    return page(demande["reference"], corps, ctx, actif=demande["reseau"], erreur=erreur)
 
 
 def action_abonner(ctx, reference):
+    exiger_connexion(ctx)
     with base() as conn:
         demande = _demande(conn, reference)
         if demande is None:
             return page("Introuvable", "<h1>Introuvable</h1>", ctx, statut=404)
-        if ctx.utilisateur is not None and not _peut_voir(ctx, conn, demande["reseau"]):
+        if not _peut_voir(ctx, conn, demande["reseau"]):
             raise Interdit("Cette structure ne voit que ce qui la concerne.")
         existant = conn.execute(
             "SELECT reference FROM eau_abonnement WHERE demande_id = ?",
@@ -141,6 +162,7 @@ def action_abonner(ctx, reference):
 
 
 def page_abonnement(ctx, reference, erreur=None):
+    exiger_connexion(ctx)
     with base() as conn:
         abonnement = _abonnement(conn, reference)
         if abonnement is None:
@@ -156,10 +178,11 @@ def page_abonnement(ctx, reference, erreur=None):
         + _identite(abonnement, lieu)
         + _paiement(ctx, abonnement)
     )
-    return page(abonnement["reference"], corps, ctx, actif="eau", erreur=erreur)
+    return page(abonnement["reference"], corps, ctx, actif=abonnement["reseau"], erreur=erreur)
 
 
 def action_payer(ctx, reference):
+    exiger_connexion(ctx)
     with base() as conn:
         abonnement = _abonnement(conn, reference)
         if abonnement is None:
@@ -174,17 +197,21 @@ def page_seg(ctx):
     with base() as conn:
         _exiger_reseau(ctx, conn, "seg")
         corps = _tableau_seg(conn)
-    return page("Tableau du SEG", corps, ctx, actif="eau")
+    return page("Tableau du SEG", corps, ctx, actif="seg")
 
 
 def page_snape(ctx):
     with base() as conn:
         _exiger_reseau(ctx, conn, "snape")
         corps = _tableau_snape(conn)
-    return page("Tableau du SNAPE", corps, ctx, actif="eau")
+    return page("Tableau du SNAPE", corps, ctx, actif="snape")
 
 
 def page_prevu(ctx):
+    exiger_connexion(ctx)
+    with base() as conn:
+        if not peut_voir_seg(conn, ctx.utilisateur) and not peut_voir_snape(conn, ctx.utilisateur):
+            raise Interdit("Cette structure ne voit que ce qui la concerne.")
     return Redirection("/eau")
 
 
@@ -306,9 +333,14 @@ def _pastille(exemple):
     return '<p class="badge-saisie" data-genre="saisie">saisie</p>'
 
 
-def _options_lieux(conn, choisi):
+def _options_lieux(conn, utilisateur, choisi):
     options = ['<option value="">Choisir</option>']
-    for reseau, libelle in (("seg", "Villes, SEG"), ("snape", "Villages, SNAPE")):
+    reseaux = []
+    if peut_voir_reseau(conn, utilisateur, "seg"):
+        reseaux.append(("seg", "Villes, SEG"))
+    if peut_voir_reseau(conn, utilisateur, "snape"):
+        reseaux.append(("snape", "Villages, SNAPE"))
+    for reseau, libelle in reseaux:
         lignes = conn.execute(
             "SELECT id, nom FROM eau_lieu WHERE reseau = ? ORDER BY nom",
             (reseau,),
@@ -396,19 +428,10 @@ def _exiger_reseau(ctx, conn, reseau):
 
 
 def _peut_voir(ctx, conn, reseau):
-    if est_hierarchie(ctx.utilisateur):
-        return True
-    structure = ctx.utilisateur["structure_id"]
-    if not structure:
-        return False
-    nom = conn.execute("SELECT nom FROM noeud WHERE id = ?", (structure,)).fetchone()
-    attendu = "SEG" if reseau == "seg" else "SNAPE"
-    return nom is not None and nom["nom"] == attendu
+    return peut_voir_reseau(conn, ctx.utilisateur, reseau)
 
 
 def _peut_lire_fiche(ctx, conn, reseau):
-    if ctx.utilisateur is None:
-        return True
     return _peut_voir(ctx, conn, reseau)
 
 

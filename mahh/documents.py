@@ -144,6 +144,8 @@ def page_directions(ctx):
                 f'<ul class="structures">{"".join(cartes)}</ul>'
                 "</section>"
             )
+        if not blocs and not est_hierarchie(ctx.utilisateur):
+            raise Interdit("Vous n’avez pas de privilège sur les directions.")
     corps = """
     <h1>Directions</h1>
     <p class="chapeau">Arborescence reprise de la note du 10 novembre 2026.
