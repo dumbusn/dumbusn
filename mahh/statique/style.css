@@ -36,11 +36,17 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem 2rem;
-  align-items: end;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
   padding: 1.1rem 1.4rem 0.9rem;
   background: var(--carte);
   border-bottom: 1px solid var(--filet);
+  text-align: center;
+}
+
+.marque {
+  width: 100%;
+  text-align: center;
 }
 
 .pays {
@@ -52,17 +58,17 @@ body {
 }
 
 .ministere {
-  margin: 0.15rem 0 0;
+  margin: 0.15rem auto 0;
   font-family: var(--serif);
   font-size: 1.25rem;
   line-height: 1.25;
-  max-width: 38rem;
+  max-width: 40rem;
 }
 
 .ministere a { color: var(--vert); text-decoration: none; }
 .ministere a:hover { text-decoration: underline; }
 
-.navigation { display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; }
+.navigation { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem 0.9rem; }
 .navigation a {
   color: var(--encre);
   text-decoration: none;
@@ -288,7 +294,7 @@ dd { margin: 0; }
 .meta { color: var(--encre-douce); font-size: 0.9rem; }
 
 @media (max-width: 720px) {
-  .entete { align-items: start; }
+  .entete { align-items: center; }
   .ministere { font-size: 1.05rem; }
   h1 { font-size: 1.6rem; }
   dl { grid-template-columns: 1fr; }

@@ -168,7 +168,11 @@ def parcours(hote, numero):
     statut, _, page, _ = anonyme.appel("GET", "/")
     verifie(statut == 200 and "<h1>Accueil</h1>" in page and "<nav" not in page, "accueil public sans session")
     verifie('data-rubrique="presentation"' in page and 'data-rubrique="actualite"' in page, "présentation et actualités")
-    verifie('data-rubrique="communique"' in page and "Communiqué de démonstration" in page, "communiqués publics")
+    verifie('data-rubrique="communique"' in page and "Plan de mobilisation des parties prenantes" in page, "communiqués publics")
+    verifie("République de Guinée" in page and "Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures" in page, "en-tête du ministère")
+    verifie("Texte d’exemple" not in page and "exemple fictif" not in page, "plus de mention d’exemple")
+    verifie("ne sont pas ceux" not in page and "ne sont pas celles" not in page, "bannière retirée")
+    verifie("data-accueil=\"public\"" not in page, "bannière publique retirée")
     verifie('href="/connexion"' in page, "lien vers la connexion")
     verifie('href="/directions"' not in page and 'href="/bsd"' not in page and 'href="/ordures"' not in page, "pas de menu métier")
     verifie('href="/eau/seg"' not in page and 'href="/eau/snape"' not in page and 'href="/instructions"' not in page, "eau et instructions fermées")
@@ -851,8 +855,44 @@ def statut_ok(page):
     return "Tableau de bord du BSD" in page
 
 
+def vitrine_remplace_lexemple():
+    import sqlite3
+
+    from mahh.db import SCHEMA, migrer, semer_vitrine
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA)
+    migrer(conn)
+    conn.execute(
+        """
+        INSERT INTO bloc_public (genre, titre, texte, publie_le, ordre, exemple, cree_le, modifie_le)
+        VALUES ('communique', 'Communiqué de démonstration', 'Texte d’exemple.', '2026-11-10', 1, 1, 'x', 'x')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO bloc_public (genre, titre, texte, publie_le, ordre, exemple, cree_le, modifie_le)
+        VALUES ('actualite', 'Note de la cellule', 'Texte conservé par la cellule.', '2026-11-11', 1, 0, 'x', 'x')
+        """
+    )
+    semer_vitrine(conn)
+    demo = conn.execute(
+        "SELECT titre, texte, exemple FROM bloc_public WHERE genre = 'communique'"
+    ).fetchone()
+    verifie(demo["exemple"] == 0, "l’ancien communiqué n’est plus un exemple")
+    verifie("démonstration" not in demo["titre"] and "Texte d’exemple" not in demo["texte"], "le texte d’exemple est remplacé")
+    garde = conn.execute(
+        "SELECT texte FROM bloc_public WHERE titre = 'Note de la cellule'"
+    ).fetchone()
+    verifie(garde["texte"] == "Texte conservé par la cellule.", "la cellule conserve son texte")
+    css = (RACINE / "mahh" / "statique" / "style.css").read_text(encoding="utf-8")
+    verifie(".marque" in css and "text-align: center" in css, "l’en-tête est centré")
+
+
 def main():
     indicateurs_exemples()
+    vitrine_remplace_lexemple()
     verifie(adresse_ecoute() == "127.0.0.1", "le test reste sur la boucle locale")
     os.environ.pop("MAHH_HOST")
     verifie(adresse_ecoute() == "0.0.0.0", "écoute par défaut sur toutes les interfaces")

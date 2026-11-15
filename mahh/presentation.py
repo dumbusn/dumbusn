@@ -112,9 +112,9 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
     {bandeau}
     {corps}
   </main>
-  <footer>
+  {"" if utilisateur is None else '''<footer>
     <p>Socle local. Les projets marqués « exemple » sont fictifs et ne sont pas ceux du ministère.</p>
-  </footer>
+  </footer>'''}
 </body>
 </html>"""
     return Html(document, statut)

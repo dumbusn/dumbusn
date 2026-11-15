@@ -1,4 +1,4 @@
-"""Page publique : présentation, actualités, communiqués. Textes d’exemple, pas ceux du site officiel."""
+"""Page publique : présentation, actualités, communiqués. La cellule de communication les modifie."""
 
 from datetime import date
 
@@ -28,10 +28,7 @@ def rendu_public(ctx):
         entree = '<p><a class="bouton" href="/communication">Modifier la page publique</a></p>'
     return (
         "<h1>Accueil</h1>"
-        + '<p class="chapeau">Page publique du ministère. Les rubriques suivent le site officiel : '
-        "présentation, actualités, communiqués. Les phrases de ce site ne sont pas recopiées.</p>"
-        + '<p class="bandeau bandeau-exemple" data-accueil="public">'
-        "Textes d’exemple. Ils ne sont pas ceux du ministère, ni ceux de mehh.gov.gn.</p>"
+        + '<p class="chapeau">Présentation, actualités et communiqués du ministère.</p>'
         + entree
         + _rubrique("presentation", "Présentation", blocs)
         + _rubrique("actualite", "Actualités", blocs)
@@ -146,12 +143,8 @@ def _rubrique(genre, titre, blocs):
     for bloc_public in blocs:
         if bloc_public["genre"] != genre:
             continue
-        pastille = ""
-        if bloc_public["exemple"]:
-            pastille = '<p class="badge-exemple" data-genre="exemple">exemple fictif</p>'
         articles.append(
             f'<article class="publication" data-bloc="{int(bloc_public["id"])}" data-genre="{genre}">'
-            f"{pastille}"
             f'<p class="meta">{echapper(fmt_date(bloc_public["publie_le"]))}</p>'
             f'<h3>{echapper(bloc_public["titre"])}</h3>'
             f'<p>{echapper(bloc_public["texte"])}</p>'

@@ -552,70 +552,114 @@ def semer_eau(conn):
     )
 
 
-def semer_vitrine(conn):
-    if conn.execute("SELECT COUNT(*) AS n FROM bloc_public").fetchone()["n"]:
-        return
-    quand = maintenant()
-    blocs = (
-        (
-            "presentation",
-            "Le ministère",
-            "Texte d’exemple, rédigé pour cette application. Il ne reprend pas le site du ministère. "
-            "Le département conduit l’action publique dans trois domaines : l’assainissement, "
-            "l’hydraulique et les hydrocarbures. Cette présentation sert de modèle de rubrique.",
-            "2026-11-01",
-            1,
-        ),
-        (
-            "presentation",
-            "Trois domaines",
-            "Texte d’exemple. L’assainissement porte sur la salubrité des localités. "
-            "L’hydraulique porte sur l’accès à l’eau. Les hydrocarbures portent sur le suivi de cette filière. "
-            "Aucune phrase du site officiel n’est reproduite.",
-            "2026-11-01",
-            2,
-        ),
-        (
-            "actualite",
-            "Réunion de coordination, exemple",
-            "Article fictif. Cette carte montre la rubrique Actualités : un titre, une date et un court texte. "
-            "Aucun événement réel du ministère n’est décrit.",
-            "2026-11-02",
-            1,
-        ),
-        (
-            "actualite",
-            "Chantier de démonstration",
-            "Article fictif. Il illustre une seconde actualité, plus ancienne, afin que la page classe les dates. "
-            "Ce n’est pas une information publiée par le ministère.",
-            "2026-10-15",
-            2,
-        ),
-        (
-            "communique",
-            "Communiqué de démonstration",
-            "Texte fictif. Cette rubrique accueille les communiqués. "
-            "La cellule de communication peut le modifier ou le retirer. "
-            "Le contenu du site officiel n’est pas recopié.",
-            "2026-11-10",
-            1,
-        ),
-        (
-            "communique",
-            "Avis de service, exemple",
-            "Texte fictif. Un avis au public peut figurer ici, avec sa date. "
-            "Ce n’est pas un avis du ministère.",
-            "2026-09-20",
-            2,
-        ),
+# Textes courts reformulés d’après le décret d’attributions d’août 2025,
+# mehh.gov.gn et les communiqués repris par gouvernement.gov.gn.
+BLOCS_VITRINE = (
+    (
+        "presentation",
+        "Le ministère",
+        "Le ministère conçoit, prépare et met en œuvre la politique du Gouvernement "
+        "pour l’assainissement, l’hydraulique et les hydrocarbures, puis en suit l’exécution. "
+        "Il prépare les textes de ces trois domaines et veille à leur application.",
+        "2025-08-27",
+        1,
+    ),
+    (
+        "presentation",
+        "Eau, salubrité et hydrocarbures",
+        "L’assainissement porte sur les déchets, les eaux usées et les eaux pluviales, "
+        "en ville comme en zone rurale. L’hydraulique porte sur l’accès à l’eau et la protection "
+        "des ressources. Les hydrocarbures portent sur la qualité des produits, les prix et le gaz butane. "
+        "La Société des eaux de Guinée, l’Agence nationale d’assainissement et de salubrité publique "
+        "et la Société guinéenne des hydrocarbures relèvent de ce périmètre.",
+        "2025-08-27",
+        2,
+    ),
+    (
+        "actualite",
+        "Lancement du Projet eau et assainissement en Guinée",
+        "Le 29 juin 2026, à Conakry, le ministère a lancé le Projet eau et assainissement en Guinée. "
+        "Il finance des infrastructures et renforce les services d’eau, d’assainissement et d’hygiène "
+        "à Conakry et dans les villes voisines. Son coordonnateur, Arafan Bayo, a indiqué que le projet "
+        "doit profiter à plus de 2,6 millions de personnes.",
+        "2026-06-29",
+        1,
+    ),
+    (
+        "actualite",
+        "Eau potable, déchets et gaz butane",
+        "Le 8 juin 2026, le ministre Aboubacar Camara a présenté les chantiers du département : "
+        "fermeture progressive de la décharge de Dar-es-Salam, réorganisation de la collecte des déchets "
+        "dans les communes de Conakry, réforme du Fonds hydraulique et promotion du gaz butane. "
+        "En zone rurale, les forages anciens doivent laisser place, peu à peu, à des ouvrages modernes "
+        "alimentés au solaire et reliés à un réseau.",
+        "2026-06-08",
+        2,
+    ),
+    (
+        "communique",
+        "Plan de mobilisation des parties prenantes",
+        "Le 30 janvier 2025, le département a publié le plan de mobilisation des parties prenantes "
+        "du Projet eau et assainissement en Guinée. Ce document indique comment les communes, "
+        "les services publics et les partenaires sont associés au projet. Il a été mis en ligne "
+        "sur le site du ministère et sur celui de la Société des eaux de Guinée.",
+        "2025-01-30",
+        1,
+    ),
+    (
+        "communique",
+        "Suivi du projet eau et assainissement",
+        "Lors du lancement du 29 juin 2026, le ministre Aboubacar Camara a rappelé que le département "
+        "coordonne le projet et en suit l’exécution. La qualité des travaux et une gestion lisible "
+        "sont les exigences retenues pour Conakry et les agglomérations voisines.",
+        "2026-06-29",
+        2,
+    ),
+)
+
+# Anciens titres du jeu de démonstration, remplacés une seule fois s’ils n’ont pas été réécrits.
+_ANCIENS_VITRINE = (
+    "Le ministère",
+    "Trois domaines",
+    "Réunion de coordination, exemple",
+    "Chantier de démonstration",
+    "Communiqué de démonstration",
+    "Avis de service, exemple",
+)
+
+
+def _inserer_bloc_public(conn, bloc, quand):
+    genre, titre, texte, publie_le, ordre = bloc
+    conn.execute(
+        """
+        INSERT INTO bloc_public (genre, titre, texte, publie_le, ordre, exemple, cree_le, modifie_le)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+        """,
+        (genre, titre, texte, publie_le, ordre, quand, quand),
     )
-    for genre, titre, texte, publie_le, ordre in blocs:
+
+
+def semer_vitrine(conn):
+    quand = maintenant()
+    if conn.execute("SELECT COUNT(*) AS n FROM bloc_public").fetchone()["n"] == 0:
+        for bloc in BLOCS_VITRINE:
+            _inserer_bloc_public(conn, bloc, quand)
+        return
+    for ancien, bloc in zip(_ANCIENS_VITRINE, BLOCS_VITRINE):
+        ligne = conn.execute(
+            "SELECT id FROM bloc_public WHERE titre = ? AND exemple = 1",
+            (ancien,),
+        ).fetchone()
+        if ligne is None:
+            continue
+        genre, titre, texte, publie_le, ordre = bloc
         conn.execute(
             """
-            INSERT INTO bloc_public (genre, titre, texte, publie_le, ordre, exemple, cree_le, modifie_le)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            UPDATE bloc_public
+            SET genre = ?, titre = ?, texte = ?, publie_le = ?, ordre = ?, exemple = 0, modifie_le = ?
+            WHERE id = ?
             """,
-            (genre, titre, texte, publie_le, ordre, quand, quand),
+            (genre, titre, texte, publie_le, ordre, quand, ligne["id"]),
         )
 
 
