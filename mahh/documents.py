@@ -108,8 +108,10 @@ def _lien_fil(conn, utilisateur, noeud):
     return f'<a href="/noeud/{int(noeud["id"])}">{echapper(noeud["nom"])}</a>'
 
 
-def page_directions(ctx):
+def page_directions(ctx, erreur=None):
     exiger_connexion(ctx)
+    from mahh.organigramme import rendu_attributions, rendu_organigramme
+
     with base() as conn:
         domaines = conn.execute(
             """
@@ -133,7 +135,6 @@ def page_directions(ctx):
                     f'<a href="/noeud/{int(structure["id"])}" data-nom="{echapper(structure["nom"])}">'
                     f'{echapper(structure["nom"])}</a>'
                     f"{sous_titre}"
-                    f'<p class="lecture">{echapper(structure["lecture"])}</p>'
                     "</li>"
                 )
             if not cartes:
@@ -146,15 +147,18 @@ def page_directions(ctx):
             )
         if not blocs and not est_hierarchie(ctx.utilisateur):
             raise Interdit("Vous n’avez pas de privilège sur les directions.")
-    corps = """
-    <h1>Directions</h1>
-    <p class="chapeau">Arborescence reprise de la note du 10 novembre 2026.
-    Les sigles qu’elle ne développe pas restent des sigles, avec la lecture indiquée sous chaque nom.
-    La hiérarchie voit toutes les directions. Une direction ou un service ne voit que la sienne.
-    Les directions citées comme responsables dans le classeur d’exemple ne sont pas ajoutées ici :
-    les deux pièces ne disent pas qu’elles sont les mêmes structures.</p>
-    """ + "".join(blocs)
-    return page("Directions", corps, ctx, actif="directions")
+        schema = rendu_organigramme(ctx, conn)
+        attributions = rendu_attributions(ctx, conn)
+    corps = (
+        "<h1>Directions</h1>"
+        '<p class="chapeau">Les directions du ministère, leur place dans l’organigramme, '
+        "et les attributions de chacune.</p>"
+        + schema
+        + attributions
+        + "<h2>Dossiers</h2>"
+        + "".join(blocs)
+    )
+    return page("Directions", corps, ctx, actif="directions", erreur=erreur)
 
 
 def page_noeud(ctx, noeud_id, erreur=None):
@@ -203,13 +207,25 @@ def _corps_noeud(ctx, conn, noeud, droits, fil, enfants, libelles):
         f'<p class="privileges" data-privileges="{echapper(privileges)}" data-admin="{admin}">'
         f"{echapper(libelle_droits(droits, ctx.utilisateur['administrateur']))}</p>"
     )
-    catalogue = ""
-    if libelles:
-        items = "".join(f"<li>{echapper(ligne['texte'])}</li>" for ligne in libelles)
-        catalogue = (
-            '<section class="catalogue"><h2>Libellés de la note, repris tels quels</h2>'
-            "<p>Aucune de ces rubriques n’est chiffrée dans ce socle.</p>"
-            f"<ul>{items}</ul></section>"
+    from mahh.organigramme import rendu_attributions, rendu_organigramme
+
+    fonctions = ""
+    if noeud["genre"] in ("domaine", "structure"):
+        fonctions = rendu_organigramme(
+            ctx, conn, noeud_id=noeud["id"], edition=False
+        ) + rendu_attributions(ctx, conn, noeud_id=noeud["id"])
+    restants = [
+        ligne for ligne in libelles if ligne["texte"] not in ("Organigramme", "Attribution")
+    ]
+    catalogue = fonctions
+    if restants:
+        cartes = "".join(
+            f'<article class="carte"><h3>{echapper(ligne["texte"])}</h3></article>'
+            for ligne in restants
+        )
+        catalogue += (
+            '<section class="indicateurs-direction"><h2>Indicateurs</h2>'
+            f'<div class="cartes">{cartes}</div></section>'
         )
     if noeud["nom"] == "BSD" and noeud["genre"] == "structure":
         catalogue += (

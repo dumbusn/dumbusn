@@ -688,6 +688,75 @@ def migrer(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organigramme (
+            id INTEGER PRIMARY KEY,
+            parent_id INTEGER REFERENCES organigramme(id) ON DELETE CASCADE,
+            nom TEXT NOT NULL,
+            intitule TEXT NOT NULL DEFAULT '',
+            ordre INTEGER NOT NULL DEFAULT 0,
+            noeud_id INTEGER REFERENCES noeud(id) ON DELETE SET NULL,
+            cree_le TEXT NOT NULL,
+            modifie_le TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attribution (
+            id INTEGER PRIMARY KEY,
+            noeud_id INTEGER NOT NULL REFERENCES noeud(id) ON DELETE CASCADE,
+            texte TEXT NOT NULL,
+            ordre INTEGER NOT NULL DEFAULT 0,
+            modifie_le TEXT NOT NULL
+        )
+        """
+    )
+
+
+def semer_organigramme(conn):
+    if conn.execute("SELECT COUNT(*) AS n FROM organigramme").fetchone()["n"]:
+        return
+    quand = maintenant()
+    domaines = conn.execute(
+        "SELECT * FROM noeud WHERE genre = 'domaine' ORDER BY ordre, nom"
+    ).fetchall()
+    for domaine in domaines:
+        curseur = conn.execute(
+            """
+            INSERT INTO organigramme (
+                parent_id, nom, intitule, ordre, noeud_id, cree_le, modifie_le
+            ) VALUES (NULL, ?, '', ?, ?, ?, ?)
+            """,
+            (domaine["nom"], domaine["ordre"], domaine["id"], quand, quand),
+        )
+        parent = curseur.lastrowid
+        structures = conn.execute(
+            """
+            SELECT * FROM noeud
+            WHERE parent_id = ? AND genre = 'structure'
+            ORDER BY ordre, nom
+            """,
+            (domaine["id"],),
+        ).fetchall()
+        for structure in structures:
+            conn.execute(
+                """
+                INSERT INTO organigramme (
+                    parent_id, nom, intitule, ordre, noeud_id, cree_le, modifie_le
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    parent,
+                    structure["nom"],
+                    structure["intitule"],
+                    structure["ordre"],
+                    structure["id"],
+                    quand,
+                    quand,
+                ),
+            )
 
 
 def preparer():
@@ -699,6 +768,7 @@ def preparer():
         semer_ordures(conn)
         semer_eau(conn)
         semer_vitrine(conn)
+        semer_organigramme(conn)
         conn.commit()
         return info
     except Exception:

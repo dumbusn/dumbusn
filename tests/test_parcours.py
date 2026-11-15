@@ -215,6 +215,59 @@ def parcours(hote, numero):
     statut, _, page, _ = admin.appel("GET", f"/noeud/{anasp.group(1)}")
     verifie("Agence nationale d’assainissement et de la salubrité publique" in page, "ANASP développé")
     verifie(statut == 200, "page ANASP")
+    verifie("<li>Organigramme</li>" not in page and "<li>Attribution</li>" not in page, "ces libellés ne sont plus des lignes")
+    verifie('data-fonction="organigramme"' in page and 'data-fonction="attribution"' in page, "fonctions sur la direction")
+    verifie('data-direction="ANASP"' in page and "Nombre de ZTT" in page, "menu ANASP et indicateurs")
+    verifie("Libellés de la note, repris tels quels" not in page, "plus de liste brute")
+    anasp_poste = re.search(r'data-poste="(\d+)" data-nom="ANASP"', page)
+    verifie(anasp_poste is not None, "case ANASP")
+    _, _, schema, _ = admin.appel(
+        "POST",
+        "/organigramme",
+        {
+            "nom": "Inspection",
+            "intitule": "Contrôle interne",
+            "parent_id": anasp_poste.group(1),
+            "retour": "/directions",
+            "jeton": jeton(page),
+        },
+    )
+    verifie('data-nom="Inspection"' in schema and 'data-organigramme="1"' in schema, "case ajoutée au schéma")
+    inspection = re.search(r'data-poste="(\d+)" data-nom="Inspection"', schema)
+    _, _, schema, _ = admin.appel(
+        "POST",
+        f"/organigramme/{inspection.group(1)}",
+        {
+            "nom": "Inspection générale",
+            "intitule": "Contrôle interne",
+            "parent_id": anasp_poste.group(1),
+            "retour": "/directions",
+            "jeton": jeton(schema),
+        },
+    )
+    verifie('data-nom="Inspection générale"' in schema, "case modifiée")
+    _, _, schema, _ = admin.appel(
+        "POST",
+        "/attribution",
+        {
+            "noeud_id": anasp.group(1),
+            "texte": "Veiller à la salubrité des communes",
+            "retour": "/directions",
+            "jeton": jeton(schema),
+        },
+    )
+    verifie("Veiller à la salubrité des communes" in schema, "attribution ajoutée")
+    attribution_id = re.search(r'data-attribution="(\d+)"', schema).group(1)
+    _, _, schema, _ = admin.appel(
+        "POST",
+        f"/attribution/{attribution_id}",
+        {
+            "texte": "Organiser la salubrité des communes",
+            "retour": "/directions",
+            "jeton": jeton(schema),
+        },
+    )
+    verifie("Organiser la salubrité des communes" in schema and "<details" in schema, "attribution modifiée dans le menu")
 
     statut, chemin, page, _ = admin.appel(
         "POST",
@@ -538,6 +591,17 @@ def parcours(hote, numero):
     _, _, ses_directions, _ = direction.appel("GET", "/directions")
     verifie('data-nom="ANASP"' in ses_directions, "sa structure")
     verifie('data-nom="DGA"' not in ses_directions and 'data-nom="SEG"' not in ses_directions, "pas les autres")
+    verifie("Organiser la salubrité des communes" in ses_directions, "son menu d’attributions")
+    verifie("Inspection générale" in ses_directions, "la case ajoutée sous sa direction")
+    verifie("Construire l’organigramme" not in ses_directions, "l’outil reste à l’administrateur")
+    _, _, compte, _ = direction.appel("GET", "/compte")
+    statut, _, _, _ = direction.appel(
+        "POST",
+        "/organigramme",
+        {"nom": "Case refusée", "retour": "/directions", "jeton": jeton(compte)},
+        suivre=False,
+    )
+    verifie(statut == 403, "une direction ne construit pas l’organigramme")
     statut, _, _, _ = direction.appel("GET", lien.group(1))
     verifie(statut == 403, "projet d'exemple refusé à la direction")
 

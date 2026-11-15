@@ -173,6 +173,48 @@ fieldset { border: 1px solid var(--filet); border-radius: 4px; display: grid; ga
 .carte-chiffre .libelle { margin: 0; color: var(--encre-douce); font-size: 0.88rem; }
 .carte-chiffre .valeur { margin: 0.25rem 0 0; font-family: var(--serif); font-size: 1.7rem; }
 
+.schema {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.4rem 2rem;
+  margin: 0.6rem 0 1.4rem;
+}
+.branche { display: flex; flex-direction: column; align-items: center; min-width: 8rem; }
+.boite {
+  background: var(--carte);
+  border: 2px solid var(--vert);
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
+  text-align: center;
+  min-width: 7.5rem;
+}
+.boite-racine { background: var(--vert); color: #fff; }
+.boite-racine a { color: #fff; }
+.boite .intitule { margin: 0.2rem 0 0; color: var(--encre-douce); font-size: 0.85rem; }
+.boite-racine .intitule { color: #f6f3ec; }
+.enfants {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.8rem;
+  width: 100%;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 2px solid var(--or);
+}
+.menu-direction {
+  background: var(--carte);
+  border: 1px solid var(--filet);
+  border-radius: 6px;
+  margin: 0.45rem 0;
+  padding: 0.35rem 0.85rem 0.6rem;
+}
+.menu-direction summary { cursor: pointer; font-weight: 700; }
+.menu-direction .intitule { font-weight: 400; color: var(--encre-douce); }
+.attributions { margin: 0.6rem 0; }
+.attributions li { margin: 0.45rem 0 0.8rem; }
+
 .domaine { margin-bottom: 0.8rem; }
 .domaine h2 { margin-top: 0; }
 .structures { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.8rem; }

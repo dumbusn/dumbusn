@@ -37,6 +37,12 @@ AVIS = {
     "bloc-cree": "Le bloc a été publié sur la page publique.",
     "bloc-modifie": "Le bloc a été modifié.",
     "bloc-retire": "Le bloc a été retiré de la page publique.",
+    "poste-cree": "La case a été ajoutée à l’organigramme.",
+    "poste-modifie": "La case de l’organigramme a été modifiée.",
+    "poste-retire": "La case a été retirée de l’organigramme.",
+    "attribution-creee": "L’attribution a été ajoutée.",
+    "attribution-modifiee": "L’attribution a été modifiée.",
+    "attribution-retiree": "L’attribution a été retirée.",
 }
 
 

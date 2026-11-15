@@ -68,6 +68,14 @@ from mahh.documents import (
     page_noeud,
     telecharger,
 )
+from mahh.organigramme import (
+    action_creer_attribution,
+    action_creer_poste,
+    action_modifier_attribution,
+    action_modifier_poste,
+    action_retirer_attribution,
+    action_retirer_poste,
+)
 from mahh.presentation import lire_avis, page_message
 from mahh.reponse import Html, Interdit, NonConnecte, Octets, Redirection
 from mahh.securite import (
@@ -122,6 +130,12 @@ ROUTES = (
     ("POST", re.compile(r"^/connexion$"), action_connexion),
     ("POST", re.compile(r"^/deconnexion$"), action_deconnexion),
     ("GET", re.compile(r"^/directions$"), page_directions),
+    ("POST", re.compile(r"^/organigramme$"), action_creer_poste),
+    ("POST", re.compile(r"^/organigramme/(\d+)$"), action_modifier_poste),
+    ("POST", re.compile(r"^/organigramme/(\d+)/retirer$"), action_retirer_poste),
+    ("POST", re.compile(r"^/attribution$"), action_creer_attribution),
+    ("POST", re.compile(r"^/attribution/(\d+)$"), action_modifier_attribution),
+    ("POST", re.compile(r"^/attribution/(\d+)/retirer$"), action_retirer_attribution),
     ("GET", re.compile(r"^/noeud/(\d+)$"), page_noeud),
     ("POST", re.compile(r"^/noeud/(\d+)/dossier$"), action_dossier),
     ("POST", re.compile(r"^/noeud/(\d+)/fichier$"), action_fichier),

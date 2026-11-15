@@ -270,8 +270,7 @@ def _tableau_seg(conn):
         _fil()
         + "<h1>Tableau du SEG</h1>"
         + _bandeau()
-        + "<p>Distribution d’eau en ville. Organigramme et attribution restent dans le dossier de la direction. "
-        "Ce tableau ne les remplit pas.</p>"
+        + "<p>Distribution d’eau en ville. L’organigramme et les attributions se règlent dans Directions.</p>"
         + "<p class=\"aide\">Taux d’abonnement et nombre de sites d’approvisionnement : demandés par le commanditaire, "
         "absents de la note. Taux d’abonnement = abonnés payants / population des villes. "
         "Taux de desserte urbain = population desservie déclarée / population des villes. "
@@ -311,7 +310,7 @@ def _tableau_snape(conn):
         _fil()
         + "<h1>Tableau du SNAPE</h1>"
         + _bandeau()
-        + "<p>Forages en zone rurale. Organigramme et attribution restent dans le dossier de la direction.</p>"
+        + "<p>Forages en zone rurale. L’organigramme et les attributions se règlent dans Directions.</p>"
         + f'<p data-villages="{len(lieux)}" data-points="{total_points}">'
         + f"Nombre de villages couvert : {len(lieux)}. "
         + f"Points d’eau realisés : {total_points}.</p>"
