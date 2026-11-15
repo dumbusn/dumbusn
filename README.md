@@ -29,6 +29,18 @@ Autres réglages : `MAHH_HOTE` (défaut `127.0.0.1`), `MAHH_PORT` (défaut `8000
 
 La base SQLite et les fichiers déposés restent dans `data/`. Ils ne vont pas dans git.
 
+## Déployer
+
+Sur un VPS Debian ou Ubuntu, depuis ce dépôt, avec sudo. Le script installe Python 3 et Caddy s’ils manquent, crée l’utilisateur de service `mahh`, et active une unité systemd qui lance `python3 -m mahh` depuis ce dossier.
+
+```bash
+sudo bash deploy/deploiement.sh
+```
+
+L’application n’écoute que sur `127.0.0.1:8000`. Caddy publie `https://mhhc.nasad.gn` et relaie vers ce port. Le port 8000 n’est pas ouvert vers l’extérieur. Le bloc du domaine est ajouté ou remplacé dans le Caddyfile ; les autres sites restent en place.
+
+Une deuxième exécution ne vide pas `data/`. Le nom `mhhc.nasad.gn` doit pointer vers le serveur pour que Caddy obtienne le certificat. Le redémarrage du service est automatique.
+
 ## Vérifier le parcours
 
 ```bash
