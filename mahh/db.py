@@ -552,6 +552,73 @@ def semer_eau(conn):
     )
 
 
+def semer_vitrine(conn):
+    if conn.execute("SELECT COUNT(*) AS n FROM bloc_public").fetchone()["n"]:
+        return
+    quand = maintenant()
+    blocs = (
+        (
+            "presentation",
+            "Le ministère",
+            "Texte d’exemple, rédigé pour cette application. Il ne reprend pas le site du ministère. "
+            "Le département conduit l’action publique dans trois domaines : l’assainissement, "
+            "l’hydraulique et les hydrocarbures. Cette présentation sert de modèle de rubrique.",
+            "2026-11-01",
+            1,
+        ),
+        (
+            "presentation",
+            "Trois domaines",
+            "Texte d’exemple. L’assainissement porte sur la salubrité des localités. "
+            "L’hydraulique porte sur l’accès à l’eau. Les hydrocarbures portent sur le suivi de cette filière. "
+            "Aucune phrase du site officiel n’est reproduite.",
+            "2026-11-01",
+            2,
+        ),
+        (
+            "actualite",
+            "Réunion de coordination, exemple",
+            "Article fictif. Cette carte montre la rubrique Actualités : un titre, une date et un court texte. "
+            "Aucun événement réel du ministère n’est décrit.",
+            "2026-11-02",
+            1,
+        ),
+        (
+            "actualite",
+            "Chantier de démonstration",
+            "Article fictif. Il illustre une seconde actualité, plus ancienne, afin que la page classe les dates. "
+            "Ce n’est pas une information publiée par le ministère.",
+            "2026-10-15",
+            2,
+        ),
+        (
+            "communique",
+            "Communiqué de démonstration",
+            "Texte fictif. Cette rubrique accueille les communiqués. "
+            "La cellule de communication peut le modifier ou le retirer. "
+            "Le contenu du site officiel n’est pas recopié.",
+            "2026-11-10",
+            1,
+        ),
+        (
+            "communique",
+            "Avis de service, exemple",
+            "Texte fictif. Un avis au public peut figurer ici, avec sa date. "
+            "Ce n’est pas un avis du ministère.",
+            "2026-09-20",
+            2,
+        ),
+    )
+    for genre, titre, texte, publie_le, ordre in blocs:
+        conn.execute(
+            """
+            INSERT INTO bloc_public (genre, titre, texte, publie_le, ordre, exemple, cree_le, modifie_le)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (genre, titre, texte, publie_le, ordre, quand, quand),
+        )
+
+
 def migrer(conn):
     def colonnes(table):
         return {ligne[1] for ligne in conn.execute(f"PRAGMA table_info({table})")}
@@ -562,6 +629,21 @@ def migrer(conn):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN structure_id INTEGER")
     if "structure_id" not in colonnes("projet"):
         conn.execute("ALTER TABLE projet ADD COLUMN structure_id INTEGER")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bloc_public (
+            id INTEGER PRIMARY KEY,
+            genre TEXT NOT NULL CHECK (genre IN ('presentation', 'actualite', 'communique')),
+            titre TEXT NOT NULL,
+            texte TEXT NOT NULL,
+            publie_le TEXT NOT NULL,
+            ordre INTEGER NOT NULL DEFAULT 0,
+            exemple INTEGER NOT NULL DEFAULT 0,
+            cree_le TEXT NOT NULL,
+            modifie_le TEXT NOT NULL
+        )
+        """
+    )
 
 
 def preparer():
@@ -572,6 +654,7 @@ def preparer():
         info = semer(conn)
         semer_ordures(conn)
         semer_eau(conn)
+        semer_vitrine(conn)
         conn.commit()
         return info
     except Exception:

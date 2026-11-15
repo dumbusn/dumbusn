@@ -22,14 +22,16 @@ from mahh.securite import (
     verifier_ou_factice,
 )
 from mahh.texte import echapper
+from mahh.vitrine import rendu_public
 
 
 def accueil(ctx):
-    if ctx.utilisateur is None:
-        return Redirection("/connexion")
-    with base() as conn:
-        cartes = _cartes(conn, ctx.utilisateur)
-        instructions = peut_voir_instructions(ctx.utilisateur)
+    cartes = []
+    instructions = False
+    if ctx.utilisateur is not None:
+        with base() as conn:
+            cartes = _cartes(conn, ctx.utilisateur)
+            instructions = peut_voir_instructions(ctx.utilisateur)
     blocs = ""
     if cartes:
         blocs = (
@@ -46,14 +48,17 @@ def accueil(ctx):
       <a class="bouton" href="/instructions">Ouvrir les instructions</a>
     </article>
     """
-    corps = f"""
-    <h1>Accueil</h1>
-    <p class="chapeau">Première page après la connexion. Seules les entrées de votre compte sont affichées.</p>
+    espace = ""
+    if cartes or instructions:
+        espace = f"""
+    <h2>Espace de travail</h2>
+    <p class="chapeau">Seules les entrées de votre compte sont affichées.</p>
     <p class="bandeau bandeau-exemple" data-accueil="exemples">Les projets affichés sont des exemples fictifs.
     Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.</p>
     {blocs}
     {bloc_instructions}
     """
+    corps = rendu_public(ctx) + espace
     return page("Accueil", corps, ctx, actif="accueil")
 
 

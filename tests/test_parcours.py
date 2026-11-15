@@ -165,8 +165,12 @@ def parcours(hote, numero):
     admin = Client(hote, numero)
     anonyme = Client(hote, numero)
     statut, _, page, _ = anonyme.appel("GET", "/")
-    verifie(statut == 200 and "<h1>Connexion</h1>" in page and "<nav" not in page, "sans session, écran de connexion")
-    verifie("Directions" not in page and "Ordures" not in page and "Instructions" not in page, "aucun menu sans session")
+    verifie(statut == 200 and "<h1>Accueil</h1>" in page and "<nav" not in page, "accueil public sans session")
+    verifie('data-rubrique="presentation"' in page and 'data-rubrique="actualite"' in page, "présentation et actualités")
+    verifie('data-rubrique="communique"' in page and "Communiqué de démonstration" in page, "communiqués publics")
+    verifie('href="/connexion"' in page, "lien vers la connexion")
+    verifie('href="/directions"' not in page and 'href="/bsd"' not in page and 'href="/ordures"' not in page, "pas de menu métier")
+    verifie('href="/eau/seg"' not in page and 'href="/eau/snape"' not in page and 'href="/instructions"' not in page, "eau et instructions fermées")
     for ferme in ("/directions", "/bsd", "/instructions", "/ordures", "/eau", "/eau/seg", "/eau/snape"):
         statut, _, page, _ = anonyme.appel("GET", ferme)
         verifie(statut == 200 and "<h1>Connexion</h1>" in page and "<nav" not in page, f"{ferme} fermé sans session")
@@ -578,6 +582,68 @@ def parcours(hote, numero):
         {"structure_id": anasp.group(1), "texte": "Une direction ne somme pas.", "jeton": jeton(vue_direction)},
     )
     verifie(statut == 403, "la direction ne somme pas")
+    parcours_vitrine(admin, direction, hote, numero)
+
+
+def parcours_vitrine(admin, direction, hote, numero):
+    _, _, utilisateurs, _ = admin.appel("GET", "/utilisateurs")
+    verifie('value="communication"' in utilisateurs, "l’administrateur peut accorder le rôle")
+    admin.appel(
+        "POST",
+        "/utilisateurs",
+        {
+            "identifiant": "cellule",
+            "nom": "Cellule de communication",
+            "mot_de_passe": "cellule-page-2026",
+            "fonction": "communication",
+            "jeton": jeton(utilisateurs),
+        },
+    )
+    cellule = Client(hote, numero)
+    _, _, formulaire, _ = cellule.appel("GET", "/connexion")
+    _, _, accueil_cellule, _ = cellule.appel(
+        "POST",
+        "/connexion",
+        {"identifiant": "cellule", "mot_de_passe": "cellule-page-2026", "jeton": jeton(formulaire)},
+    )
+    verifie('href="/communication"' in _nav(accueil_cellule), "la cellule voit la communication")
+    verifie("/ordures" not in _nav(accueil_cellule) and "/eau/seg" not in _nav(accueil_cellule), "la cellule n’a pas le menu métier")
+    _, _, edition, _ = cellule.appel("GET", "/communication")
+    bloc = re.search(
+        r'data-bloc="(\d+)" data-genre="communique"',
+        edition,
+    )
+    verifie(bloc is not None, "un communiqué est éditable")
+    _, _, apres, _ = cellule.appel(
+        "POST",
+        f"/communication/{bloc.group(1)}",
+        {
+            "titre": "Avis modifié par la cellule",
+            "publie_le": "2026-11-12",
+            "texte": "Communiqué réécrit par la cellule de communication. Texte fictif.",
+            "jeton": jeton(edition),
+        },
+    )
+    verifie("Avis modifié par la cellule" in apres, "la cellule a modifié le communiqué")
+    anonyme = Client(hote, numero)
+    _, _, public, _ = anonyme.appel("GET", "/")
+    verifie("Avis modifié par la cellule" in public, "le communiqué modifié est public")
+    verifie("<nav" not in public, "le visiteur ne voit toujours pas le menu")
+    statut, _, refuse, _ = direction.appel("GET", "/communication")
+    verifie(statut == 403, "une direction n’ouvre pas la communication")
+    _, _, accueil_direction, _ = direction.appel("GET", "/")
+    statut, _, _, _ = direction.appel(
+        "POST",
+        f"/communication/{bloc.group(1)}",
+        {
+            "titre": "Une direction ne réécrit pas",
+            "publie_le": "2026-11-12",
+            "texte": "Tentative refusée.",
+            "jeton": jeton(accueil_direction),
+        },
+        suivre=False,
+    )
+    verifie(statut == 403, "une direction ne modifie pas le communiqué")
 
 
 def parcours_ordures(admin, hote, numero):

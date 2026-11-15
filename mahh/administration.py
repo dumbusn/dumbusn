@@ -1,7 +1,7 @@
 """Comptes, groupes et privilèges. Réservé à l'administrateur, sauf le changement de mot de passe."""
 
 from mahh.db import base
-from mahh.droits import FONCTIONS, exiger_admin, exiger_connexion
+from mahh.droits import FONCTION_COMMUNICATION, FONCTIONS, exiger_admin, exiger_connexion
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Redirection, ValeurRefusee
 from mahh.securite import (
@@ -318,6 +318,7 @@ def page_utilisateurs(ctx, erreur=None):
         + "".join(
             f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in FONCTIONS.items()
         )
+        + '<option value="communication">Cellule de communication</option>'
         + "</select>"
         + '<label for="structure">Rattachement</label>'
         + '<select id="structure" name="structure_id">'
@@ -328,7 +329,9 @@ def page_utilisateurs(ctx, erreur=None):
         )
         + "</select>"
         + '<p class="aide">Une fonction de hiérarchie ouvre tout le ministère. '
-        "Sans cette fonction, le rattachement limite le compte à une direction ou un service.</p>"
+        "La cellule de communication rédige la page publique, sans ouvrir les directions. "
+        "Sans fonction, le rattachement limite le compte à une direction ou un service. "
+        "Une direction ne gère pas la page publique.</p>"
         + '<button type="submit">Créer le compte</button></form>'
     )
     return page("Utilisateurs", corps, ctx, actif="utilisateurs", erreur=erreur)
@@ -344,7 +347,7 @@ def action_utilisateur(ctx):
         return page_utilisateurs(ctx, erreur=exc.message)
     admin = 1 if ctx.formulaire.get("administrateur") is not None else 0
     fonction = (ctx.formulaire.get("fonction") or "").strip()
-    if fonction not in FONCTIONS and fonction != "":
+    if fonction not in FONCTIONS and fonction not in ("", FONCTION_COMMUNICATION):
         return page_utilisateurs(ctx, erreur="Cette fonction n’est pas reconnue.")
     with base() as conn:
         if conn.execute(
@@ -373,6 +376,8 @@ def _role(personne):
         morceaux.append("administrateur")
     if personne["fonction"] in FONCTIONS:
         morceaux.append(FONCTIONS[personne["fonction"]])
+    elif personne["fonction"] == FONCTION_COMMUNICATION:
+        morceaux.append("cellule de communication")
     elif personne["structure_id"]:
         morceaux.append("direction ou service")
     return ", ".join(morceaux) if morceaux else "compte"

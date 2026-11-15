@@ -9,6 +9,7 @@ FONCTIONS = {
     "secretaire_general": "Secrétaire général",
     "bsd": "BSD",
 }
+FONCTION_COMMUNICATION = "communication"
 
 
 def exiger_connexion(ctx):
@@ -36,6 +37,15 @@ def est_hierarchie(utilisateur):
     if utilisateur["administrateur"]:
         return True
     return (utilisateur["fonction"] or "") in FONCTIONS
+
+
+def peut_gerer_vitrine(utilisateur):
+    """La page publique : hiérarchie, BSD, administrateur, cellule de communication."""
+    if not utilisateur:
+        return False
+    if est_hierarchie(utilisateur):
+        return True
+    return (utilisateur["fonction"] or "") == FONCTION_COMMUNICATION
 
 
 def dans_perimetre(conn, noeud_id, structure_id):
@@ -193,6 +203,8 @@ def entrees_menu(conn, utilisateur):
         entrees.append(("/eau/seg", "SEG", "seg"))
     if peut_voir_snape(conn, utilisateur):
         entrees.append(("/eau/snape", "SNAPE", "snape"))
+    if peut_gerer_vitrine(utilisateur):
+        entrees.append(("/communication", "Communication", "communication"))
     if utilisateur["administrateur"]:
         entrees.append(("/groupes", "Groupes", "groupes"))
         entrees.append(("/utilisateurs", "Utilisateurs", "utilisateurs"))

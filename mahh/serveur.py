@@ -77,6 +77,12 @@ from mahh.securite import (
     nouveau_jeton,
     utilisateur_par_jeton,
 )
+from mahh.vitrine import (
+    action_creer as action_bloc,
+    action_modifier as action_bloc_modifier,
+    action_retirer as action_bloc_retirer,
+    page_edition,
+)
 from mahh.tableau import (
     action_modifier,
     action_piece,
@@ -108,6 +114,10 @@ class Demande:
 
 ROUTES = (
     ("GET", re.compile(r"^/$"), accueil),
+    ("GET", re.compile(r"^/communication$"), page_edition),
+    ("POST", re.compile(r"^/communication$"), action_bloc),
+    ("POST", re.compile(r"^/communication/(\d+)$"), action_bloc_modifier),
+    ("POST", re.compile(r"^/communication/(\d+)/retirer$"), action_bloc_retirer),
     ("GET", re.compile(r"^/connexion$"), page_connexion),
     ("POST", re.compile(r"^/connexion$"), action_connexion),
     ("POST", re.compile(r"^/deconnexion$"), action_deconnexion),
@@ -326,6 +336,7 @@ def _cookies(en_tete):
 
 def _sans_session(methode, chemin):
     return (methode, chemin) in {
+        ("GET", "/"),
         ("GET", "/connexion"),
         ("POST", "/connexion"),
         ("POST", "/deconnexion"),

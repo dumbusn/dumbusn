@@ -34,6 +34,9 @@ AVIS = {
     "demande-eau-creee": "La demande d’eau est enregistrée.",
     "abonnement-eau-cree": "L’abonnement d’eau est ouvert. Le paiement ne l’est pas encore.",
     "paiement-eau-enregistre": "Le paiement de l’abonnement d’eau a été enregistré.",
+    "bloc-cree": "Le bloc a été publié sur la page publique.",
+    "bloc-modifie": "Le bloc a été modifié.",
+    "bloc-retire": "Le bloc a été retiré de la page publique.",
 }
 
 
@@ -51,7 +54,14 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
     utilisateur = ctx.utilisateur
     if utilisateur is None:
         navigation = ""
-        session = ""
+        if ctx.chemin == "/connexion":
+            session = ""
+        else:
+            session = (
+                '<div class="session">'
+                '<a class="bouton" href="/connexion">Se connecter</a>'
+                "</div>"
+            )
     else:
         from mahh.db import base
         from mahh.droits import entrees_menu
