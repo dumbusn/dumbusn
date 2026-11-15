@@ -25,7 +25,7 @@ Au premier lancement, le compte administrateur est créé.
 
 L’identifiant par défaut est `admin`. `MAHH_ADMIN_IDENTIFIANT` le remplace au premier lancement seulement.
 
-Autres réglages : `MAHH_HOTE` (défaut `127.0.0.1`), `MAHH_PORT` (défaut `8000`), `MAHH_DATA` (défaut le dossier `data/` à côté du programme).
+Autres réglages : `MAHH_HOST` (défaut `0.0.0.0`), `MAHH_PORT` (défaut `8000`), `MAHH_DATA` (défaut le dossier `data/` à côté du programme). En local, l’adresse de travail reste http://127.0.0.1:8000/.
 
 La base SQLite et les fichiers déposés restent dans `data/`. Ils ne vont pas dans git.
 
@@ -37,7 +37,7 @@ Sur un VPS Debian ou Ubuntu, depuis ce dépôt, avec sudo. Le script installe Py
 sudo bash deploy/deploiement.sh
 ```
 
-L’application n’écoute que sur `127.0.0.1:8000`. Caddy publie `https://mhhc.nasad.gn` et relaie vers ce port. Le port 8000 n’est pas ouvert vers l’extérieur. Le bloc du domaine est ajouté ou remplacé dans le Caddyfile ; les autres sites restent en place.
+Le service écoute sur `MAHH_HOST` (défaut `0.0.0.0`, port 8000) pour qu’un proxy du réseau local puisse le joindre. L’adresse publique reste `https://mhhc.nasad.gn`. Le bloc du domaine est ajouté ou remplacé dans le Caddyfile ; les autres sites restent en place.
 
 Une deuxième exécution ne vide pas `data/`. Le nom `mhhc.nasad.gn` doit pointer vers le serveur pour que Caddy obtienne le certificat. Le redémarrage du service est automatique.
 

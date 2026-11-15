@@ -16,11 +16,12 @@ sys.path.insert(0, str(RACINE))
 os.environ["MAHH_DATA"] = tempfile.mkdtemp(prefix="mahh-test-")
 os.environ["MAHH_ADMIN_MOT_DE_PASSE"] = "admin-socle-2026"
 os.environ["MAHH_PORT"] = "0"
-os.environ["MAHH_HOTE"] = "127.0.0.1"
+os.environ["MAHH_HOST"] = "127.0.0.1"
 os.environ["MAHH_SILENCIEUX"] = "1"
 
 from mahh.calculs import points_attention, synthese
 from mahh.seed import projets_exemples
+from mahh.config import hote as adresse_ecoute
 from mahh.serveur import nouveau_serveur
 from mahh.texte import fmt_pourcent
 
@@ -852,6 +853,10 @@ def statut_ok(page):
 
 def main():
     indicateurs_exemples()
+    verifie(adresse_ecoute() == "127.0.0.1", "le test reste sur la boucle locale")
+    os.environ.pop("MAHH_HOST")
+    verifie(adresse_ecoute() == "0.0.0.0", "écoute par défaut sur toutes les interfaces")
+    os.environ["MAHH_HOST"] = "127.0.0.1"
     serveur = nouveau_serveur()
     fil = threading.Thread(target=serveur.serve_forever, daemon=True)
     fil.start()

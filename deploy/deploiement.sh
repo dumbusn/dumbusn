@@ -1,6 +1,7 @@
 #!/bin/bash
-# Déploie l’application derrière Caddy, sur Debian ou Ubuntu.
-# Le port 8000 reste sur 127.0.0.1. data/ n’est jamais effacé.
+# Déploie l’application derrière le proxy, sur Debian ou Ubuntu.
+# Le service écoute sur MAHH_HOST (0.0.0.0). data/ n’est jamais effacé.
+# L’adresse publique reste le nom de domaine.
 set -euo pipefail
 
 SITE="mhhc.nasad.gn"
@@ -161,7 +162,7 @@ Type=simple
 User=${SERVICE}
 Group=${SERVICE}
 WorkingDirectory=${ROOT}
-Environment=MAHH_HOTE=127.0.0.1
+Environment=MAHH_HOST=0.0.0.0
 Environment=MAHH_PORT=8000
 Environment=MAHH_DATA=${ROOT}/data
 ExecStart=${PYTHON} -m mahh
@@ -190,6 +191,6 @@ else
   systemctl start caddy
 fi
 
-echo "Service ${SERVICE} actif, écoute réservée à 127.0.0.1:8000."
-echo "Caddy publie https://${SITE} sans ouvrir le port 8000."
+echo "Service ${SERVICE} actif, écoute sur 0.0.0.0:8000 pour le proxy du réseau local."
+echo "L’adresse publique reste https://${SITE}."
 echo "Les fichiers de data/ sont conservés."
