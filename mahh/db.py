@@ -3,6 +3,7 @@
 import os
 import sqlite3
 from contextlib import contextmanager
+from datetime import date
 
 from mahh.config import repertoire_donnees
 from mahh.securite import ecrire_mot_initial, hasher, maintenant, preparer_mot_admin
@@ -129,6 +130,92 @@ CREATE TABLE IF NOT EXISTS sommation (
     cree_le TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS maille (
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER REFERENCES maille(id),
+    genre TEXT NOT NULL CHECK (genre IN ('region', 'prefecture', 'sous_prefecture', 'quartier', 'secteur')),
+    nom TEXT NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS pme (
+    id INTEGER PRIMARY KEY,
+    nom TEXT NOT NULL,
+    gestion TEXT NOT NULL CHECK (gestion IN ('commune', 'gouvernorat')),
+    contact TEXT NOT NULL,
+    jour_collecte TEXT NOT NULL,
+    heure_collecte TEXT NOT NULL,
+    frais_hors_jour TEXT NOT NULL DEFAULT '0',
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS pme_secteur (
+    pme_id INTEGER NOT NULL REFERENCES pme(id) ON DELETE CASCADE,
+    secteur_id INTEGER NOT NULL REFERENCES maille(id),
+    PRIMARY KEY (pme_id, secteur_id)
+);
+
+CREATE TABLE IF NOT EXISTS effectif (
+    id INTEGER PRIMARY KEY,
+    pme_id INTEGER NOT NULL REFERENCES pme(id) ON DELETE CASCADE,
+    jour TEXT NOT NULL,
+    nombre INTEGER NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS trajet (
+    id INTEGER PRIMARY KEY,
+    pme_id INTEGER NOT NULL REFERENCES pme(id) ON DELETE CASCADE,
+    jour TEXT NOT NULL,
+    libelle TEXT NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS point_collecte (
+    id INTEGER PRIMARY KEY,
+    nom TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    secteur_id INTEGER REFERENCES maille(id),
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS abonnement (
+    id INTEGER PRIMARY KEY,
+    reference TEXT NOT NULL UNIQUE,
+    nom TEXT NOT NULL,
+    telephone TEXT NOT NULL,
+    secteur_id INTEGER NOT NULL REFERENCES maille(id),
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    pme_id INTEGER REFERENCES pme(id),
+    montant_gnf TEXT NOT NULL,
+    paye INTEGER NOT NULL DEFAULT 0,
+    exemple INTEGER NOT NULL DEFAULT 0,
+    cree_le TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS passage (
+    id INTEGER PRIMARY KEY,
+    abonnement_id INTEGER NOT NULL REFERENCES abonnement(id) ON DELETE CASCADE,
+    agent TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    jour TEXT NOT NULL,
+    heure TEXT NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS signalement (
+    id INTEGER PRIMARY KEY,
+    abonnement_id INTEGER NOT NULL REFERENCES abonnement(id) ON DELETE CASCADE,
+    jour TEXT NOT NULL,
+    hors_jour INTEGER NOT NULL,
+    frais_gnf TEXT NOT NULL DEFAULT '0',
+    exemple INTEGER NOT NULL DEFAULT 0,
+    cree_le TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_noeud_parent ON noeud(parent_id);
 CREATE INDEX IF NOT EXISTS idx_session_utilisateur ON session(utilisateur_id);
 """
@@ -227,6 +314,116 @@ def semer(conn):
     }
 
 
+def semer_ordures(conn):
+    if conn.execute("SELECT COUNT(*) AS n FROM maille").fetchone()["n"]:
+        return
+    def ajouter(parent, genre, nom):
+        curseur = conn.execute(
+            "INSERT INTO maille (parent_id, genre, nom, exemple) VALUES (?, ?, ?, 1)",
+            (parent, genre, nom),
+        )
+        return curseur.lastrowid
+
+    region = ajouter(None, "region", "Région exemple")
+    prefecture = ajouter(region, "prefecture", "Préfecture exemple")
+    commune = ajouter(prefecture, "sous_prefecture", "Commune exemple")
+    nord = ajouter(commune, "quartier", "Quartier Nord")
+    sud = ajouter(commune, "quartier", "Quartier Sud")
+    secteur_a = ajouter(nord, "secteur", "Secteur A")
+    secteur_b = ajouter(sud, "secteur", "Secteur B")
+    secteur_c = ajouter(sud, "secteur", "Secteur C")
+
+    def creer_pme(nom, gestion, contact, jour, heure, frais, secteurs):
+        curseur = conn.execute(
+            """
+            INSERT INTO pme (
+                nom, gestion, contact, jour_collecte, heure_collecte, frais_hors_jour, exemple
+            ) VALUES (?, ?, ?, ?, ?, ?, 1)
+            """,
+            (nom, gestion, contact, jour, heure, frais),
+        )
+        pme_id = curseur.lastrowid
+        for secteur in secteurs:
+            conn.execute(
+                "INSERT INTO pme_secteur (pme_id, secteur_id) VALUES (?, ?)",
+                (pme_id, secteur),
+            )
+        return pme_id
+
+    alpha = creer_pme(
+        "PME Alpha", "commune", "620 00 00 01", "mardi", "7 h 00 – 9 h 00", "15000",
+        (secteur_a, secteur_b),
+    )
+    beta = creer_pme(
+        "PME Bêta", "gouvernorat", "620 00 00 02", "jeudi", "8 h 00 – 10 h 00", "20000",
+        (secteur_c,),
+    )
+    aujourd_hui = date.today().isoformat()
+    conn.execute(
+        "INSERT INTO effectif (pme_id, jour, nombre, exemple) VALUES (?, ?, 6, 1)",
+        (alpha, aujourd_hui),
+    )
+    conn.execute(
+        "INSERT INTO effectif (pme_id, jour, nombre, exemple) VALUES (?, ?, 4, 1)",
+        (beta, aujourd_hui),
+    )
+    conn.execute(
+        "INSERT INTO trajet (pme_id, jour, libelle, exemple) VALUES (?, ?, ?, 1)",
+        (alpha, aujourd_hui, "Secteur A, puis Secteur B"),
+    )
+    conn.execute(
+        "INSERT INTO trajet (pme_id, jour, libelle, exemple) VALUES (?, ?, ?, 1)",
+        (beta, aujourd_hui, "Secteur C, aller et retour"),
+    )
+    conn.execute(
+        """
+        INSERT INTO point_collecte (nom, latitude, longitude, secteur_id, exemple)
+        VALUES (?, ?, ?, ?, 1)
+        """,
+        ("Point ANASP Nord", "9.641200", "-13.578400", secteur_a),
+    )
+    conn.execute(
+        """
+        INSERT INTO point_collecte (nom, latitude, longitude, secteur_id, exemple)
+        VALUES (?, ?, ?, ?, 1)
+        """,
+        ("Point ANASP Sud", "9.632100", "-13.590200", secteur_c),
+    )
+    quand = maintenant()
+    awa = conn.execute(
+        """
+        INSERT INTO abonnement (
+            reference, nom, telephone, secteur_id, latitude, longitude, pme_id,
+            montant_gnf, paye, exemple, cree_le
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+        """,
+        ("ORD-EX-01", "Awa Camara", "621 00 00 11", secteur_a, "9.641110", "-13.578310", alpha, "50000", quand),
+    ).lastrowid
+    conn.execute(
+        """
+        INSERT INTO abonnement (
+            reference, nom, telephone, secteur_id, latitude, longitude, pme_id,
+            montant_gnf, paye, exemple, cree_le
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?)
+        """,
+        ("ORD-EX-02", "Moussa Barry", "621 00 00 12", secteur_c, "9.632050", "-13.590150", beta, "50000", quand),
+    )
+    conn.execute(
+        """
+        INSERT INTO passage (abonnement_id, agent, latitude, longitude, jour, heure, exemple)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+        """,
+        (awa, "Aïssatou Bah", "9.641150", "-13.578330", aujourd_hui, "7 h 20"),
+    )
+    conn.execute(
+        """
+        INSERT INTO signalement (abonnement_id, jour, hors_jour, frais_gnf, exemple, cree_le)
+        VALUES (?, ?, 1, ?, 1, ?)
+        """,
+        (awa, aujourd_hui, "15000", quand),
+    )
+
+
 def migrer(conn):
     def colonnes(table):
         return {ligne[1] for ligne in conn.execute(f"PRAGMA table_info({table})")}
@@ -245,6 +442,7 @@ def preparer():
         conn.executescript(SCHEMA)
         migrer(conn)
         info = semer(conn)
+        semer_ordures(conn)
         conn.commit()
         return info
     except Exception:

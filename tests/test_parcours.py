@@ -169,7 +169,8 @@ def parcours(hote, numero):
     verifie("Collecte des ordures" in page and "SEG et SNAPE" in page, "blocs à venir")
     verifie("Ouvrir les instructions" in page, "accès aux instructions depuis l’accueil")
     verifie("Les projets affichés sont des exemples" in page, "rappel exemples")
-    verifie(page.count("Pas construit") == 2, "deux blocs non construits")
+    verifie(page.count("Pas construit") == 1, "seul le bloc eau n’est pas construit")
+    verifie('href="/ordures"' in page and "Ouvrir la collecte" in page, "accueil ouvre la collecte")
     _, _, ailleurs, _ = admin.appel("GET", "/bsd")
     verifie('class="nav nav-accueil"' in ailleurs, "accès accueil depuis le tableau")
     _, _, retour, _ = admin.appel("GET", "/")
@@ -341,9 +342,7 @@ def parcours(hote, numero):
     _, _, retour, _ = admin.appel("GET", "/bsd")
     verifie(indiquer(retour, "projets") == "18", "retour à 18 après suppression")
 
-    _, _, ordures, _ = admin.appel("GET", "/prevu/ordures")
-    verifie("n’est pas construit" in ordures and "poubelle pleine" in ordures, "ordures")
-    verifie("sous-préfecture" in ordures, "maillage ordures")
+    parcours_ordures(admin, hote, numero)
     _, _, eau, _ = admin.appel("GET", "/prevu/eau")
     verifie("n’est pas construit" in eau and "taux d’abonnement" in eau, "eau")
     verifie("sites d’approvisionnement" in eau and "en ville" in eau, "SEG ville")
@@ -537,6 +536,76 @@ def parcours(hote, numero):
         {"structure_id": anasp.group(1), "texte": "Une direction ne somme pas.", "jeton": jeton(vue_direction)},
     )
     verifie(statut == 403, "la direction ne somme pas")
+
+
+def parcours_ordures(admin, hote, numero):
+    public = Client(hote, numero)
+    statut, _, page, _ = public.appel("GET", "/ordures", suivre=False)
+    verifie(statut == 200 and "<h1>Collecte des ordures</h1>" in page, "module ordures public")
+    verifie("ne sont pas ceux du ministère" in page, "bannière exemple ordures")
+    verifie("S’abonner" in page, "abonnement en ligne")
+    _, _, formulaire, _ = public.appel("GET", "/ordures/abonnement")
+    option = re.search(r'<option value="(\d+)">([^<]*Secteur A)</option>', formulaire)
+    verifie(option is not None, "chaîne de rattachement")
+    verifie("Région exemple" in option.group(2) and "Préfecture exemple" in option.group(2), "région et préfecture")
+    verifie("Commune exemple" in option.group(2) and "Quartier Nord" in option.group(2), "commune et quartier")
+    _, chemin, fiche, _ = public.appel(
+        "POST",
+        "/ordures/abonnement",
+        {
+            "nom": "Fatou Diallo",
+            "telephone": "622 00 00 13",
+            "secteur_id": option.group(1),
+            "latitude": "9,641500",
+            "longitude": "-13.578500",
+            "jeton": jeton(formulaire),
+        },
+    )
+    verifie("/ordures/a/ORD-" in chemin, "référence d’abonnement")
+    verifie("9.641500" in fiche and "-13.578500" in fiche, "GPS enregistré")
+    verifie("Sous-préfecture ou commune" in fiche and "Secteur ou village" in fiche, "maillage affiché")
+    verifie("mardi" in fiche and "620 00 00 01" in fiche, "jours et contact communiqués")
+    verifie('data-paye="0"' in fiche, "paiement encore ouvert")
+    reference = chemin.rstrip("/").split("/")[-1].split("?")[0]
+    _, _, fiche, _ = public.appel(
+        "POST",
+        f"/ordures/a/{reference}/payer",
+        {"jeton": jeton(fiche)},
+    )
+    verifie('data-paye="1"' in fiche, "paiement enregistré")
+    _, _, fiche, _ = public.appel(
+        "POST",
+        f"/ordures/a/{reference}/signalement",
+        {"jeton": jeton(fiche)},
+    )
+    verifie("poubelle pleine" in fiche.lower() or "Poubelle pleine" in fiche or "data-hors-jour" in fiche, "signalement")
+    verifie('data-hors-jour="' in fiche, "hors jour indiqué")
+    _, _, exemple, _ = public.appel("GET", "/ordures/a/ORD-EX-01")
+    verifie('data-genre="exemple"' in exemple and "Aïssatou Bah" in exemple, "exemple et agent")
+    statut, _, _, _ = public.appel("GET", "/ordures/pme", suivre=False)
+    verifie(statut in (302, 303), "le suivi PME demande un compte")
+
+    _, _, pme, _ = admin.appel("GET", "/ordures/pme")
+    verifie('data-pme="PME Alpha"' in pme and 'data-gestion="commune"' in pme, "PME de commune")
+    verifie('data-pme="PME Bêta"' in pme and 'data-gestion="gouvernorat"' in pme, "PME du gouvernorat")
+    verifie("Secteur A" in pme and "Secteur B" in pme, "plusieurs secteurs pour une PME")
+    verifie("Effectif du jour" in pme and "Secteur A, puis Secteur B" in pme, "effectif et trajet")
+    _, _, points, _ = admin.appel("GET", "/ordures/points")
+    verifie("Point ANASP Nord" in points and 'data-exemple="1"' in points, "point ANASP avec pastille")
+    verifie("9.641200" in points, "GPS du point")
+    _, _, fiche, _ = admin.appel("GET", f"/ordures/a/{reference}")
+    _, _, fiche, _ = admin.appel(
+        "POST",
+        f"/ordures/a/{reference}/passage",
+        {
+            "agent": "Mamadou Camara",
+            "latitude": "9.641510",
+            "longitude": "-13.578510",
+            "heure": "8 h 05",
+            "jeton": jeton(fiche),
+        },
+    )
+    verifie("Mamadou Camara" in fiche and "9.641510" in fiche, "agent localisé chez l’abonné")
 
 
 def statut_ok(page):

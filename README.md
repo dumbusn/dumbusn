@@ -2,7 +2,7 @@
 
 Socle local de l’application unique du Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures, République de Guinée.
 
-Deux blocs sont en service : la gestion documentaire des directions, et le tableau de bord du BSD. Une page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions. Le ministre, le secrétaire général, le chef de cabinet et le BSD ont l’accès complet. Une direction ne voit que ses projets et ce qui la concerne. La collecte des ordures, le SEG et le SNAPE sont décrits dans l’application et ne sont pas construits.
+Trois blocs sont en service : la gestion documentaire des directions, le tableau de bord du BSD, et la collecte des ordures. Une page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions. Le ministre, le secrétaire général, le chef de cabinet et le BSD ont l’accès complet. Une direction ne voit que ses projets et ce qui la concerne. Le SEG et le SNAPE sont décrits dans l’application et ne sont pas construits.
 
 Les dix-huit projets chargés au premier lancement sont un **exemple fictif**, repris d’un classeur de démonstration. Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.
 
@@ -45,5 +45,6 @@ Le test crée une base temporaire, se connecte, ouvre une direction, crée un do
 - Écran BSD : registre filtrable, indicateurs du classeur, jeu d’exemple marqué. Le code d’un projet ouvre ses notes, ses rapports et le classement des documents physiques.
 - Page d’instructions, et sommation d’une direction en retard depuis cette page.
 - Accès complet pour la hiérarchie et le BSD ; vue limitée au rattachement pour une direction.
+- Collecte des ordures : abonnement, paiement enregistré, GPS, rattachement, PME, points ANASP, agents, signalement. Le jeu de départ est un exemple.
 
-Hors de ce socle : abonnement et tournées de collecte des ordures ; demande, abonnement et tableaux de bord du SEG et du SNAPE.
+Hors de ce socle : demande, abonnement et tableaux de bord du SEG et du SNAPE.

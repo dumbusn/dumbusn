@@ -45,10 +45,10 @@ def accueil(ctx):
         <a class="bouton" href="/bsd">Ouvrir le tableau de bord</a>
       </article>
       <article class="carte" data-bloc="ordures">
-        <p class="etat etat-ferme">Pas construit</p>
+        <p class="etat etat-ouvert">En service</p>
         <h2>Collecte des ordures</h2>
-        <p>Abonnement, paiement et tournées. Le périmètre est écrit, l’écran n’existe pas.</p>
-        <a class="bouton secondaire" href="/prevu/ordures">Lire le périmètre</a>
+        <p>Abonnement, paiement, tournées et signalement. Le jeu chargé au départ est un exemple fictif.</p>
+        <a class="bouton" href="/ordures">Ouvrir la collecte</a>
       </article>
       <article class="carte" data-bloc="eau">
         <p class="etat etat-ferme">Pas construit</p>
@@ -111,27 +111,6 @@ def action_deconnexion(ctx):
     ctx.cookies.append(cookie_session_vide())
     ctx.cookies.append(cookie_jeton(nouveau_jeton()))
     return Redirection("/connexion")
-
-
-def page_ordures(ctx):
-    exiger_connexion(ctx)
-    corps = """
-    <h1>Collecte des ordures</h1>
-    <p class="bandeau bandeau-vide">Ce module n’est pas construit dans ce socle.</p>
-    <p>Le périmètre demandé, pour une suite, est le suivant.</p>
-    <ul>
-      <li>Abonnement en ligne et paiement.</li>
-      <li>Relevé GPS de l’abonné à l’inscription.</li>
-      <li>Rattachement au secteur : région, préfecture, sous-préfecture ou commune, quartier ou district, secteur ou village.</li>
-      <li>Signalement « poubelle pleine » hors jour de collecte, avec des frais supplémentaires possibles selon la PME.</li>
-      <li>PME gérées par les communes et le gouvernorat. Une PME peut couvrir plusieurs secteurs. Le sigle PME n’est pas développé dans la note.</li>
-      <li>Points de collecte de l’ANASP, avec GPS.</li>
-      <li>Agents qui se localisent pour la tournée.</li>
-      <li>Jours, heures et contact communiqués à l’avance à l’abonné.</li>
-      <li>Effectifs et trajets du jour suivis par la PME.</li>
-    </ul>
-    """
-    return page("Collecte des ordures", corps, ctx, actif="accueil")
 
 
 def page_eau(ctx):
