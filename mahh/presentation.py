@@ -31,6 +31,9 @@ AVIS = {
     "signalement-enregistre": "Le signalement « poubelle pleine » a été enregistré.",
     "passage-enregistre": "La position de l’agent a été enregistrée.",
     "suivi-enregistre": "Le suivi du jour a été enregistré.",
+    "demande-eau-creee": "La demande d’eau est enregistrée.",
+    "abonnement-eau-cree": "L’abonnement d’eau est ouvert. Le paiement ne l’est pas encore.",
+    "paiement-eau-enregistre": "Le paiement de l’abonnement d’eau a été enregistré.",
 }
 
 
@@ -56,6 +59,7 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
             ("/bsd", "Tableau de bord", "bsd"),
             ("/instructions", "Instructions", "instructions"),
             ("/ordures", "Ordures", "ordures"),
+            ("/eau", "Eau", "eau"),
         ]
         if utilisateur["administrateur"]:
             liens.extend(

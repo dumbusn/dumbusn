@@ -169,8 +169,9 @@ def parcours(hote, numero):
     verifie("Collecte des ordures" in page and "SEG et SNAPE" in page, "blocs à venir")
     verifie("Ouvrir les instructions" in page, "accès aux instructions depuis l’accueil")
     verifie("Les projets affichés sont des exemples" in page, "rappel exemples")
-    verifie(page.count("Pas construit") == 1, "seul le bloc eau n’est pas construit")
+    verifie("Pas construit" not in page, "les quatre blocs sont en service")
     verifie('href="/ordures"' in page and "Ouvrir la collecte" in page, "accueil ouvre la collecte")
+    verifie('href="/eau"' in page and "Ouvrir l’eau" in page, "accueil ouvre l’eau")
     _, _, ailleurs, _ = admin.appel("GET", "/bsd")
     verifie('class="nav nav-accueil"' in ailleurs, "accès accueil depuis le tableau")
     _, _, retour, _ = admin.appel("GET", "/")
@@ -343,9 +344,7 @@ def parcours(hote, numero):
     verifie(indiquer(retour, "projets") == "18", "retour à 18 après suppression")
 
     parcours_ordures(admin, hote, numero)
-    _, _, eau, _ = admin.appel("GET", "/prevu/eau")
-    verifie("n’est pas construit" in eau and "taux d’abonnement" in eau, "eau")
-    verifie("sites d’approvisionnement" in eau and "en ville" in eau, "SEG ville")
+    parcours_eau(admin, hote, numero)
 
     agent = Client(hote, numero)
     _, _, page, _ = agent.appel("GET", "/connexion")
@@ -606,6 +605,113 @@ def parcours_ordures(admin, hote, numero):
         },
     )
     verifie("Mamadou Camara" in fiche and "9.641510" in fiche, "agent localisé chez l’abonné")
+
+
+def parcours_eau(admin, hote, numero):
+    public = Client(hote, numero)
+    statut, _, page, _ = public.appel("GET", "/eau", suivre=False)
+    verifie(statut == 200 and "SEG" in page and "SNAPE" in page, "module eau public")
+    verifie("ne sont pas ceux du ministère" in page, "bannière exemple eau")
+    _, _, seg, _ = admin.appel("GET", "/eau/seg")
+    verifie('data-abonnes="5"' in seg and 'data-taux-abonnement="33.3"' in seg, "taux d’abonnement SEG")
+    verifie('data-sites="3"' in seg and 'data-villes="2"' in seg, "sites et villes")
+    verifie('data-desserte="53.3"' in seg, "taux de desserte")
+    verifie('data-facturation="80.0"' in seg and 'data-recouvrement="62.5"' in seg, "facturation et recouvrement")
+    verifie('data-produit="1000"' in seg and 'data-distribue="800"' in seg, "volumes")
+    verifie('data-ville="Ville Alpha"' in seg and 'data-ville="Ville Bêta"' in seg, "liste des villes")
+    verifie("Nombre d’abonné" in seg and "Taux de desserte urbain" in seg, "libellés SEG de la note")
+    _, _, snape, _ = admin.appel("GET", "/eau/snape")
+    verifie('data-villages="2"' in snape and 'data-points="3"' in snape, "villages et points")
+    verifie('data-village="Village Nord"' in snape and 'data-couverte="250"' in snape, "population couverte")
+    verifie('data-forages="2"' in snape and "realisés" in snape, "points realisés, graphie de la note")
+    statut, _, _, _ = public.appel("GET", "/eau/seg", suivre=False)
+    verifie(statut in (302, 303), "le tableau SEG demande un compte")
+
+    _, _, directions, _ = admin.appel("GET", "/directions")
+    seg_id = re.search(r'/noeud/(\d+)" data-nom="SEG"', directions).group(1)
+    snape_id = re.search(r'/noeud/(\d+)" data-nom="SNAPE"', directions).group(1)
+    anasp_id = re.search(r'/noeud/(\d+)" data-nom="ANASP"', directions).group(1)
+    _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
+    jeton_users = jeton(page_users)
+    for ident, mot, extra in (
+        ("segville", "seg-eau-2026", {"structure_id": seg_id}),
+        ("snaperural", "snape-eau-2026", {"structure_id": snape_id}),
+        ("anaspvue", "anasp-eau-2026", {"structure_id": anasp_id}),
+        ("bsdeau", "bsd-eau-2026xx", {"fonction": "bsd"}),
+    ):
+        champs = {
+            "identifiant": ident,
+            "nom": ident,
+            "mot_de_passe": mot,
+            "jeton": jeton_users,
+        }
+        champs.update(extra)
+        admin.appel("POST", "/utilisateurs", champs)
+        _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
+        jeton_users = jeton(page_users)
+
+    def compte(ident, mot):
+        client = Client(hote, numero)
+        _, _, formulaire, _ = client.appel("GET", "/connexion")
+        client.appel(
+            "POST",
+            "/connexion",
+            {"identifiant": ident, "mot_de_passe": mot, "jeton": jeton(formulaire)},
+        )
+        return client
+
+    seg_compte = compte("segville", "seg-eau-2026")
+    statut, _, page, _ = seg_compte.appel("GET", "/eau/seg")
+    verifie(statut == 200 and "Ville Alpha" in page, "le SEG voit son tableau")
+    statut, _, _, _ = seg_compte.appel("GET", "/eau/snape")
+    verifie(statut == 403, "le SEG ne voit pas le SNAPE")
+    snape_compte = compte("snaperural", "snape-eau-2026")
+    statut, _, page, _ = snape_compte.appel("GET", "/eau/snape")
+    verifie(statut == 200 and "Village Nord" in page, "le SNAPE voit son tableau")
+    statut, _, _, _ = snape_compte.appel("GET", "/eau/seg")
+    verifie(statut == 403, "le SNAPE ne voit pas le SEG")
+    autre = compte("anaspvue", "anasp-eau-2026")
+    statut, _, _, _ = autre.appel("GET", "/eau/seg")
+    verifie(statut == 403, "une autre direction ne voit pas le SEG")
+    bsd = compte("bsdeau", "bsd-eau-2026xx")
+    statut_seg, _, _, _ = bsd.appel("GET", "/eau/seg")
+    statut_snape, _, _, _ = bsd.appel("GET", "/eau/snape")
+    verifie(statut_seg == 200 and statut_snape == 200, "le BSD voit les deux tableaux")
+
+    _, _, formulaire, _ = public.appel("GET", "/eau/demande")
+    lieu = re.search(r'<option value="(\d+)">Ville Alpha</option>', formulaire)
+    verifie(lieu is not None, "ville SEG proposée")
+    _, chemin, fiche, _ = public.appel(
+        "POST",
+        "/eau/demande",
+        {
+            "nom": "Kadiatou Sylla",
+            "telephone": "624 00 00 14",
+            "lieu_id": lieu.group(1),
+            "latitude": "9,652000",
+            "longitude": "-13.572000",
+            "jeton": jeton(formulaire),
+        },
+    )
+    verifie("/eau/d/EAU-" in chemin and "Ville Alpha" in fiche and "9.652000" in fiche, "demande SEG")
+    reference = chemin.rstrip("/").split("/")[-1].split("?")[0]
+    _, chemin, fiche, _ = public.appel(
+        "POST",
+        f"/eau/d/{reference}/abonner",
+        {"jeton": jeton(fiche)},
+    )
+    verifie("/eau/a/EAU-" in chemin and 'data-paye="0"' in fiche, "abonnement ouvert")
+    reference_abonnement = chemin.rstrip("/").split("/")[-1].split("?")[0]
+    _, _, fiche, _ = public.appel(
+        "POST",
+        f"/eau/a/{reference_abonnement}/payer",
+        {"jeton": jeton(fiche)},
+    )
+    verifie('data-paye="1"' in fiche, "paiement de l’eau enregistré")
+    _, _, seg, _ = admin.appel("GET", "/eau/seg")
+    verifie('data-abonnes="6"' in seg and 'data-taux-abonnement="40.0"' in seg, "le taux suit le nouvel abonné")
+    statut, _, _, _ = snape_compte.appel("GET", f"/eau/a/{reference_abonnement}")
+    verifie(statut == 403, "le SNAPE ne voit pas l’abonné du SEG")
 
 
 def statut_ok(page):

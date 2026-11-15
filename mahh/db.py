@@ -216,6 +216,64 @@ CREATE TABLE IF NOT EXISTS signalement (
     cree_le TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS eau_lieu (
+    id INTEGER PRIMARY KEY,
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg', 'snape')),
+    nom TEXT NOT NULL,
+    population INTEGER NOT NULL DEFAULT 0,
+    population_couverte INTEGER NOT NULL DEFAULT 0,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS eau_site (
+    id INTEGER PRIMARY KEY,
+    lieu_id INTEGER NOT NULL REFERENCES eau_lieu(id),
+    nom TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS eau_situation (
+    id INTEGER PRIMARY KEY,
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg')),
+    volume_produit TEXT NOT NULL,
+    volume_distribue TEXT NOT NULL,
+    montant_du TEXT NOT NULL,
+    montant_facture TEXT NOT NULL,
+    montant_recouvre TEXT NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS eau_demande (
+    id INTEGER PRIMARY KEY,
+    reference TEXT NOT NULL UNIQUE,
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg', 'snape')),
+    lieu_id INTEGER NOT NULL REFERENCES eau_lieu(id),
+    nom TEXT NOT NULL,
+    telephone TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    etat TEXT NOT NULL CHECK (etat IN ('recue', 'abonne')),
+    exemple INTEGER NOT NULL DEFAULT 0,
+    cree_le TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eau_abonnement (
+    id INTEGER PRIMARY KEY,
+    reference TEXT NOT NULL UNIQUE,
+    demande_id INTEGER REFERENCES eau_demande(id),
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg', 'snape')),
+    lieu_id INTEGER NOT NULL REFERENCES eau_lieu(id),
+    nom TEXT NOT NULL,
+    telephone TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    paye INTEGER NOT NULL DEFAULT 0,
+    exemple INTEGER NOT NULL DEFAULT 0,
+    cree_le TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_noeud_parent ON noeud(parent_id);
 CREATE INDEX IF NOT EXISTS idx_session_utilisateur ON session(utilisateur_id);
 """
@@ -424,6 +482,76 @@ def semer_ordures(conn):
     )
 
 
+def semer_eau(conn):
+    if conn.execute("SELECT COUNT(*) AS n FROM eau_lieu").fetchone()["n"]:
+        return
+
+    def lieu(reseau, nom, population, couverte):
+        curseur = conn.execute(
+            """
+            INSERT INTO eau_lieu (reseau, nom, population, population_couverte, exemple)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            (reseau, nom, population, couverte),
+        )
+        return curseur.lastrowid
+
+    alpha = lieu("seg", "Ville Alpha", 10, 6)
+    beta = lieu("seg", "Ville Bêta", 5, 2)
+    nord = lieu("snape", "Village Nord", 400, 250)
+    sud = lieu("snape", "Village Sud", 200, 80)
+
+    def site(lieu_id, nom, latitude, longitude):
+        conn.execute(
+            """
+            INSERT INTO eau_site (lieu_id, nom, latitude, longitude, exemple)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            (lieu_id, nom, latitude, longitude),
+        )
+
+    site(alpha, "Site Alpha 1", "9.650100", "-13.570100")
+    site(alpha, "Site Alpha 2", "9.651200", "-13.571200")
+    site(beta, "Site Bêta 1", "9.660300", "-13.580300")
+    site(nord, "Forage Nord 1", "10.100100", "-13.200100")
+    site(nord, "Forage Nord 2", "10.101200", "-13.201200")
+    site(sud, "Forage Sud 1", "10.050100", "-13.250100")
+    conn.execute(
+        """
+        INSERT INTO eau_situation (
+            reseau, volume_produit, volume_distribue, montant_du, montant_facture,
+            montant_recouvre, exemple
+        ) VALUES ('seg', '1000', '800', '500000', '400000', '250000', 1)
+        """
+    )
+    quand = maintenant()
+
+    def abonne(reference, reseau, lieu_id, nom, latitude, longitude):
+        conn.execute(
+            """
+            INSERT INTO eau_abonnement (
+                reference, reseau, lieu_id, nom, telephone, latitude, longitude,
+                paye, exemple, cree_le
+            ) VALUES (?, ?, ?, ?, '623 00 00 01', ?, ?, 1, 1, ?)
+            """,
+            (reference, reseau, lieu_id, nom, latitude, longitude, quand),
+        )
+
+    for index in range(1, 5):
+        abonne(f"EAU-EX-S{index}", "seg", alpha, f"Abonné exemple {index}", "9.650000", "-13.570000")
+    abonne("EAU-EX-S5", "seg", beta, "Abonné exemple 5", "9.660000", "-13.580000")
+    abonne("EAU-EX-N1", "snape", nord, "Abonné rural 1", "10.100000", "-13.200000")
+    abonne("EAU-EX-N2", "snape", sud, "Abonné rural 2", "10.050000", "-13.250000")
+    conn.execute(
+        """
+        INSERT INTO eau_demande (
+            reference, reseau, lieu_id, nom, telephone, latitude, longitude, etat, exemple, cree_le
+        ) VALUES ('EAU-EX-D1', 'seg', ?, 'Demande exemple', '623 00 00 09', '9.650500', '-13.570500', 'recue', 1, ?)
+        """,
+        (alpha, quand),
+    )
+
+
 def migrer(conn):
     def colonnes(table):
         return {ligne[1] for ligne in conn.execute(f"PRAGMA table_info({table})")}
@@ -443,6 +571,7 @@ def preparer():
         migrer(conn)
         info = semer(conn)
         semer_ordures(conn)
+        semer_eau(conn)
         conn.commit()
         return info
     except Exception:

@@ -2,7 +2,7 @@
 
 Socle local de l’application unique du Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures, République de Guinée.
 
-Trois blocs sont en service : la gestion documentaire des directions, le tableau de bord du BSD, et la collecte des ordures. Une page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions. Le ministre, le secrétaire général, le chef de cabinet et le BSD ont l’accès complet. Une direction ne voit que ses projets et ce qui la concerne. Le SEG et le SNAPE sont décrits dans l’application et ne sont pas construits.
+Les quatre blocs sont en service : la gestion documentaire des directions, le tableau de bord du BSD, la collecte des ordures, et l’eau (SEG en ville, SNAPE en zone rurale). Une page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions. Le ministre, le secrétaire général, le chef de cabinet et le BSD ont l’accès complet. Une direction ne voit que ce qui la concerne.
 
 Les dix-huit projets chargés au premier lancement sont un **exemple fictif**, repris d’un classeur de démonstration. Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.
 
@@ -46,5 +46,4 @@ Le test crée une base temporaire, se connecte, ouvre une direction, crée un do
 - Page d’instructions, et sommation d’une direction en retard depuis cette page.
 - Accès complet pour la hiérarchie et le BSD ; vue limitée au rattachement pour une direction.
 - Collecte des ordures : abonnement, paiement enregistré, GPS, rattachement, PME, points ANASP, agents, signalement. Le jeu de départ est un exemple.
-
-Hors de ce socle : demande, abonnement et tableaux de bord du SEG et du SNAPE.
+- Eau : demande et abonnement SEG et SNAPE, tableaux avec les libellés de la note. Le jeu de départ est un exemple. La hiérarchie et le BSD voient les deux. Chaque structure ne voit que le sien.

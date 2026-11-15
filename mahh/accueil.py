@@ -1,7 +1,6 @@
 """Accueil, connexion, et pages des blocs qui ne sont pas encore construits."""
 
 from mahh.db import base
-from mahh.droits import exiger_connexion
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Redirection
 from mahh.securite import (
@@ -51,10 +50,10 @@ def accueil(ctx):
         <a class="bouton" href="/ordures">Ouvrir la collecte</a>
       </article>
       <article class="carte" data-bloc="eau">
-        <p class="etat etat-ferme">Pas construit</p>
+        <p class="etat etat-ouvert">En service</p>
         <h2>SEG et SNAPE</h2>
-        <p>SEG en ville, SNAPE en zone rurale. Ces écrans ne sont pas construits.</p>
-        <a class="bouton secondaire" href="/prevu/eau">Lire le périmètre</a>
+        <p>SEG en ville, SNAPE en zone rurale. Demande, abonnement et tableaux. Le jeu chargé est un exemple fictif.</p>
+        <a class="bouton" href="/eau">Ouvrir l’eau</a>
       </article>
     </div>
     <h2>Instructions</h2>
@@ -112,17 +111,3 @@ def action_deconnexion(ctx):
     ctx.cookies.append(cookie_jeton(nouveau_jeton()))
     return Redirection("/connexion")
 
-
-def page_eau(ctx):
-    exiger_connexion(ctx)
-    corps = """
-    <h1>Eau : SEG et SNAPE</h1>
-    <p class="bandeau bandeau-vide">Ce module n’est pas construit dans ce socle.</p>
-    <p>SEG reste le sigle de la note, situé par le commanditaire sur la distribution d’eau en ville.
-    Le SNAPE, Service national d’aménagement des points d’eau, est situé en zone rurale.
-    Ces deux écrans métier n’existent pas encore. Aucun taux et aucun site ne sont affichés.</p>
-    <p>Pour chacune, la suite demandée est : une demande en ligne, un abonnement en ligne,
-    et un tableau de bord. Ce tableau comprend le taux d’abonnement et les sites d’approvisionnement,
-    demandés en plus de la note, ainsi que les libellés déjà écrits pour SEG et pour SNAPE.</p>
-    """
-    return page("Eau", corps, ctx, actif="accueil")

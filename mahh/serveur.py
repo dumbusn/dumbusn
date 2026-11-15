@@ -14,7 +14,18 @@ from mahh.accueil import (
     action_connexion,
     action_deconnexion,
     page_connexion,
-    page_eau,
+)
+from mahh.eau import (
+    action_abonner,
+    action_demande,
+    action_payer as action_payer_eau,
+    page_abonnement as page_abonnement_eau,
+    page_demande,
+    page_demande_fiche,
+    page_module as page_eau,
+    page_prevu as page_prevu_eau,
+    page_seg,
+    page_snape,
 )
 from mahh.ordures import (
     action_abonnement,
@@ -145,7 +156,16 @@ ROUTES = (
     ("POST", re.compile(r"^/ordures/a/([A-Za-z0-9-]+)/signalement$"), action_signalement),
     ("POST", re.compile(r"^/ordures/a/([A-Za-z0-9-]+)/passage$"), action_passage),
     ("GET", re.compile(r"^/prevu/ordures$"), page_prevu),
-    ("GET", re.compile(r"^/prevu/eau$"), page_eau),
+    ("GET", re.compile(r"^/eau$"), page_eau),
+    ("GET", re.compile(r"^/eau/demande$"), page_demande),
+    ("POST", re.compile(r"^/eau/demande$"), action_demande),
+    ("GET", re.compile(r"^/eau/d/([A-Za-z0-9-]+)$"), page_demande_fiche),
+    ("POST", re.compile(r"^/eau/d/([A-Za-z0-9-]+)/abonner$"), action_abonner),
+    ("GET", re.compile(r"^/eau/a/([A-Za-z0-9-]+)$"), page_abonnement_eau),
+    ("POST", re.compile(r"^/eau/a/([A-Za-z0-9-]+)/payer$"), action_payer_eau),
+    ("GET", re.compile(r"^/eau/seg$"), page_seg),
+    ("GET", re.compile(r"^/eau/snape$"), page_snape),
+    ("GET", re.compile(r"^/prevu/eau$"), page_prevu_eau),
     ("GET", re.compile(r"^/statique/style\.css$"), None),
     ("GET", re.compile(r"^/favicon\.ico$"), None),
 )
