@@ -507,6 +507,27 @@ def migrer(conn):
         )
         """
     )
+    for colonne, definition in (
+        ("echeance", "TEXT NOT NULL DEFAULT ''"),
+        ("etat", "TEXT NOT NULL DEFAULT 'en_cours'"),
+        ("execute_le", "TEXT"),
+        ("execute_par", "INTEGER"),
+        ("compte_rendu", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if colonne not in colonnes("instruction"):
+            conn.execute(f"ALTER TABLE instruction ADD COLUMN {colonne} {definition}")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS journal (
+            id INTEGER PRIMARY KEY,
+            utilisateur_id INTEGER REFERENCES utilisateur(id) ON DELETE SET NULL,
+            action TEXT NOT NULL,
+            chemin TEXT NOT NULL,
+            quand TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_journal_quand ON journal(quand)")
 
 
 def semer_organigramme(conn):

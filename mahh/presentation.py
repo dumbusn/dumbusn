@@ -28,6 +28,8 @@ AVIS = {
     "projet-rattache": "Le rattachement a été enregistré.",
     "piece-ajoutee": "L’élément a été ajouté au dossier du projet.",
     "instruction-creee": "L’instruction a été publiée.",
+    "instruction-executee": "L’instruction a été marquée exécutée.",
+    "instruction-rouverte": "L’instruction a été rouverte.",
     "abonnement-cree": "L’abonnement est enregistré. Le paiement ne l’est pas encore.",
     "paiement-enregistre": "Le paiement a été enregistré.",
     "signalement-enregistre": "Le signalement « poubelle pleine » a été enregistré.",
@@ -61,10 +63,13 @@ def jeton_cache(ctx):
 def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
     utilisateur = ctx.utilisateur
     if utilisateur is None:
-        navigation = ""
         if ctx.chemin == "/connexion":
+            navigation = ""
             session = ""
         else:
+            from mahh.site_public import menu_public
+
+            navigation = menu_public(ctx.chemin)
             session = (
                 '<div class="session">'
                 '<a class="bouton" href="/connexion">Se connecter</a>'
@@ -105,6 +110,7 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
   <meta name="robots" content="noindex">
   <title>{echapper(titre)} — Ministère</title>
   <link rel="stylesheet" href="/statique/style.css">
+  <script src="/statique/outils.js" defer></script>
 </head>
 <body>
   <div class="tricolore" aria-hidden="true"><i></i><i></i><i></i></div>

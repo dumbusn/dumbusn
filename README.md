@@ -6,6 +6,8 @@ Les quatre blocs sont en service : la gestion documentaire des directions, le ta
 
 Le registre des projets, les actualités, les communiqués et les tableaux de la collecte, du SEG et du SNAPE restent vides tant que les services n’ont pas saisi leurs données.
 
+La page publique, ouverte sans connexion, reprend le menu d’un site de ministère. La cellule de communication rédige la présentation, les actualités et les communiqués. L’organigramme affiché est celui que l’administrateur construit. Après connexion : carte des points GPS déjà saisis, export CSV du registre visible, journal des actions pour l’administrateur, et suivi d’exécution des instructions (échéance, compte rendu). Aucun chiffre n’est affiché s’il n’a pas été saisi.
+
 ## Lancer
 
 Depuis la racine de ce dépôt, avec Python 3.11 ou plus récent. Aucune dépendance à installer.
@@ -55,7 +57,9 @@ Le test crée une base temporaire, se connecte, ouvre une direction, crée un do
 - Arbre des domaines et des structures de la note du 10 novembre 2026. Les sigles qu’elle ne développe pas restent des sigles.
 - Dossiers et fichiers, avec créer, consulter, modifier, supprimer par groupe.
 - Écran BSD : registre filtrable. Le code d’un projet ouvre ses notes, ses rapports et le classement des documents physiques. Le BSD saisit les projets.
-- Page d’instructions, du ministre aux directions. Le suivi des retards se lit dans les tableaux.
+- Page d’instructions, du ministre aux directions. Le suivi des retards se lit dans les tableaux. Une instruction peut porter une échéance et être marquée exécutée, avec un compte rendu.
+- Carte des coordonnées GPS déjà enregistrées, export CSV du registre visible, journal d’activité réservé à l’administrateur.
+- Page publique : menu du ministère, pages à compléter par la cellule de communication, organigramme construit par l’administrateur.
 - Accès complet pour la hiérarchie et le BSD ; vue limitée au rattachement pour une direction.
 - Collecte des ordures : localités, PME, abonnement, paiement enregistré, GPS, agents, signalement. L’ANASP saisit ces éléments.
 - Eau : demande et abonnement SEG et SNAPE. Chaque service saisit ses villes ou ses villages. La hiérarchie et le BSD voient les deux. Chaque structure ne voit que le sien.

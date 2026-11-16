@@ -166,9 +166,12 @@ def parcours(hote, numero):
     admin = Client(hote, numero)
     anonyme = Client(hote, numero)
     statut, _, page, _ = anonyme.appel("GET", "/")
-    verifie(statut == 200 and "<h1>Accueil</h1>" in page and "<nav" not in page, "accueil public sans session")
-    verifie('data-rubrique="presentation"' in page and 'data-rubrique="actualite"' in page, "présentation et actualités")
-    verifie('data-rubrique="communique"' in page and "Aucun texte publié" in page, "communiqués à rédiger")
+    verifie(
+        statut == 200 and "<h1>Accueil</h1>" in page and 'class="menu-public"' in page and 'class="navigation"' not in page,
+        "accueil public sans session",
+    )
+    verifie("Le ministère conçoit" in page and "Aucune actualité publiée" in page, "présentation et actualités à rédiger")
+    verifie('href="/p/missions"' in page and 'href="/p/communiques"' in page, "menu public")
     verifie("Arafan" not in page and "Aboubacar" not in page and "2,6" not in page, "pas de communiqué chiffré")
     verifie("République de Guinée" in page and "Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures" in page, "en-tête du ministère")
     verifie("Texte d’exemple" not in page and "exemple fictif" not in page, "plus de mention d’exemple")
@@ -177,7 +180,7 @@ def parcours(hote, numero):
     verifie('href="/connexion"' in page, "lien vers la connexion")
     verifie('href="/directions"' not in page and 'href="/bsd"' not in page and 'href="/ordures"' not in page, "pas de menu métier")
     verifie('href="/eau/seg"' not in page and 'href="/eau/snape"' not in page and 'href="/instructions"' not in page, "eau et instructions fermées")
-    for ferme in ("/directions", "/bsd", "/instructions", "/ordures", "/eau", "/eau/seg", "/eau/snape"):
+    for ferme in ("/directions", "/bsd", "/instructions", "/ordures", "/eau", "/eau/seg", "/eau/snape", "/carte", "/journal", "/bsd/export.csv"):
         statut, _, page, _ = anonyme.appel("GET", ferme)
         verifie(statut == 200 and "<h1>Connexion</h1>" in page and "<nav" not in page, f"{ferme} fermé sans session")
     statut, _, page, _ = anonyme.appel("GET", "/connexion")
@@ -199,7 +202,10 @@ def parcours(hote, numero):
     verifie("Pas construit" not in page, "les quatre blocs sont en service")
     verifie('href="/ordures"' in page and "Ouvrir la collecte" in page, "accueil ouvre la collecte")
     verifie('href="/eau/seg"' in page and 'href="/eau/snape"' in page, "accueil ouvre SEG et SNAPE")
-    verifie(_menu_contient(page, ("/directions", "/bsd", "/instructions", "/ordures", "/eau/seg", "/eau/snape")), "menu complet de la hiérarchie")
+    verifie(
+        _menu_contient(page, ("/directions", "/bsd", "/instructions", "/ordures", "/eau/seg", "/eau/snape", "/carte", "/journal")),
+        "menu complet de la hiérarchie",
+    )
     _, _, ailleurs, _ = admin.appel("GET", "/bsd")
     verifie('class="nav nav-accueil"' in ailleurs, "accès accueil depuis le tableau")
     _, _, retour, _ = admin.appel("GET", "/")
@@ -633,7 +639,8 @@ def parcours(hote, numero):
         {"identifiant": "anasp", "mot_de_passe": "anasp-socle-2026", "jeton": jeton(page)},
     )
     _, _, accueil_direction, _ = direction.appel("GET", "/")
-    verifie(_menu_contient(accueil_direction, ("/directions", "/bsd", "/instructions", "/ordures")), "menu ANASP")
+    verifie(_menu_contient(accueil_direction, ("/directions", "/bsd", "/instructions", "/ordures", "/carte")), "menu ANASP")
+    verifie("/journal" not in _nav(accueil_direction), "le journal reste à l’administrateur")
     verifie("/eau/seg" not in _nav(accueil_direction) and "/eau/snape" not in _nav(accueil_direction), "ANASP sans SEG ni SNAPE")
     verifie('data-bloc="seg"' not in accueil_direction and 'data-bloc="snape"' not in accueil_direction, "cartes eau cachées")
     _, _, vue, _ = direction.appel("GET", "/bsd")
@@ -670,6 +677,23 @@ def parcours(hote, numero):
         },
     )
     verifie("Note du ministre pour le cabinet de test." in ecran, "instruction publiée")
+    verifie("Marquer exécutée" in ecran and "En cours" in ecran, "suivi d’exécution")
+    verifie("Sommer" not in ecran and "sommation" not in ecran.lower(), "pas de sommation après publication")
+    execution = re.search(r'action="/instructions/(\d+)/executer"', ecran)
+    verifie(execution is not None, "formulaire d’exécution")
+    _, _, ecran, _ = admin.appel(
+        "POST",
+        f"/instructions/{execution.group(1)}/executer",
+        {"compte_rendu": "Note transmise au cabinet.", "jeton": jeton(ecran)},
+    )
+    verifie("Exécutée le" in ecran and "Note transmise au cabinet." in ecran, "instruction exécutée")
+    _, _, journal, _ = admin.appel("GET", "/journal")
+    verifie("Instruction publiée" in journal and "Instruction marquée exécutée" in journal, "journal des actions")
+    verifie("Sommation" not in journal, "le journal ne parle pas de sommation")
+    _, _, carte, _ = admin.appel("GET", "/carte")
+    verifie("carte-svg" in carte and "Fatou Diallo" in carte, "carte des points saisis")
+    _, _, csv, _ = admin.appel("GET", "/bsd/export.csv")
+    verifie("Code;Secteur" in csv and "TEST-01" in csv and "ASS-01" not in csv and "Exemple" not in csv, "export du registre saisi")
     _, _, vue_direction, _ = direction.appel("GET", "/instructions")
     verifie("Sommer" not in vue_direction, "la direction ne voit pas de sommation")
     verifie("Note du ministre pour le cabinet de test." not in vue_direction, "instruction du cabinet cachée")
@@ -700,6 +724,7 @@ def parcours_vitrine(admin, direction, hote, numero):
     )
     verifie('href="/communication"' in _nav(accueil_cellule), "la cellule voit la communication")
     verifie("/ordures" not in _nav(accueil_cellule) and "/eau/seg" not in _nav(accueil_cellule), "la cellule n’a pas le menu métier")
+    verifie("/journal" not in _nav(accueil_cellule) and "/carte" not in _nav(accueil_cellule), "la cellule n’a ni journal ni carte")
     _, _, edition, _ = cellule.appel("GET", "/communication")
     _, _, edition, _ = cellule.appel(
         "POST",
@@ -731,7 +756,12 @@ def parcours_vitrine(admin, direction, hote, numero):
     anonyme = Client(hote, numero)
     _, _, public, _ = anonyme.appel("GET", "/")
     verifie("Avis modifié par la cellule" in public, "le communiqué modifié est public")
-    verifie("<nav" not in public, "le visiteur ne voit toujours pas le menu")
+    verifie('class="menu-public"' in public and 'class="navigation"' not in public, "le visiteur voit le menu public")
+    verifie('href="/bsd"' not in public and 'href="/ordures"' not in public, "le visiteur n’a pas le menu métier")
+    statut, _, missions, _ = anonyme.appel("GET", "/p/missions")
+    verifie(statut == 200 and "Missions et attributions" in missions and "cellule de communication" in missions, "page missions")
+    _, _, organigramme, _ = anonyme.appel("GET", "/p/organigramme")
+    verifie("ANASP" in organigramme and "Schéma construit par l’administration" in organigramme, "organigramme public")
     statut, _, refuse, _ = direction.appel("GET", "/communication")
     verifie(statut == 403, "une direction n’ouvre pas la communication")
     _, _, accueil_direction, _ = direction.appel("GET", "/")

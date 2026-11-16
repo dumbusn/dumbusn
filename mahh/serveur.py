@@ -9,6 +9,8 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
+from mahh.carte import page_carte
+from mahh.exports import export_projets
 from mahh.accueil import (
     accueil,
     action_connexion,
@@ -61,7 +63,14 @@ from mahh.administration import (
 )
 from mahh.config import hote, port
 from mahh.db import preparer
-from mahh.instructions import action_instruction, page_instructions
+from mahh.instructions import (
+    action_executer,
+    action_instruction,
+    action_rouvrir,
+    page_instructions,
+)
+from mahh.journal import page_journal
+from mahh.site_public import page_publique
 from mahh.documents import (
     action_dossier,
     action_fichier,
@@ -166,6 +175,12 @@ ROUTES = (
     ("GET", re.compile(r"^/piece/(\d+)$"), telecharger_piece),
     ("GET", re.compile(r"^/instructions$"), page_instructions),
     ("POST", re.compile(r"^/instructions$"), action_instruction),
+    ("POST", re.compile(r"^/instructions/(\d+)/executer$"), action_executer),
+    ("POST", re.compile(r"^/instructions/(\d+)/rouvrir$"), action_rouvrir),
+    ("GET", re.compile(r"^/carte$"), page_carte),
+    ("GET", re.compile(r"^/journal$"), page_journal),
+    ("GET", re.compile(r"^/bsd/export\.csv$"), export_projets),
+    ("GET", re.compile(r"^/p/([a-z0-9-]+)$"), page_publique),
     ("GET", re.compile(r"^/bsd/projet/(\d+)/modifier$"), page_modifier),
     ("POST", re.compile(r"^/bsd/projet/(\d+)/modifier$"), action_modifier),
     ("POST", re.compile(r"^/bsd/projet/(\d+)/supprimer$"), action_supprimer_projet),
@@ -246,6 +261,10 @@ class Gestionnaire(BaseHTTPRequestHandler):
             fichier = Path(__file__).resolve().parent / "statique" / "style.css"
             self._envoyer(Octets(fichier.read_bytes(), "text/css; charset=utf-8"), ctx.cookies)
             return
+        if chemin == "/statique/outils.js" and self.command == "GET":
+            fichier = Path(__file__).resolve().parent / "statique" / "outils.js"
+            self._envoyer(Octets(fichier.read_bytes(), "text/javascript; charset=utf-8"), ctx.cookies)
+            return
         if chemin == "/favicon.ico" and self.command == "GET":
             self._envoyer(Octets(b"", "image/x-icon", statut=204), ctx.cookies)
             return
@@ -299,6 +318,13 @@ class Gestionnaire(BaseHTTPRequestHandler):
             resultat = Redirection("/connexion?suivant=" + _chemin_suivant(exc.chemin))
         except Interdit as exc:
             resultat = page_message(ctx, "Accès refusé", exc.message, 403)
+        if self.command == "POST" and isinstance(resultat, Redirection) and ctx.utilisateur is not None:
+            try:
+                from mahh.journal import consigner
+
+                consigner(ctx.utilisateur["id"], chemin)
+            except Exception:
+                traceback.print_exc()
         self._envoyer(resultat, ctx.cookies)
 
     def _envoyer(self, resultat, cookies):
@@ -354,12 +380,14 @@ def _cookies(en_tete):
 
 
 def _sans_session(methode, chemin):
-    return (methode, chemin) in {
+    if (methode, chemin) in {
         ("GET", "/"),
         ("GET", "/connexion"),
         ("POST", "/connexion"),
         ("POST", "/deconnexion"),
-    }
+    }:
+        return True
+    return methode == "GET" and re.fullmatch(r"/p/[a-z0-9-]+", chemin) is not None
 
 
 def _chemin_suivant(chemin):

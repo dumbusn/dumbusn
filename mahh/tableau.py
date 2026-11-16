@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from secrets import token_hex
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from mahh.calculs import (
     FINANCEMENTS_EXEMPLE,
@@ -335,6 +335,15 @@ def _corps(ctx, resume, projets, attention, responsables, secteur, direction, st
     saisie = ""
     if ctx.utilisateur["administrateur"]:
         saisie = '<p><a class="bouton" href="/bsd/saisie">Saisir un projet</a></p>'
+    parametres = {
+        cle: valeur
+        for cle, valeur in (("secteur", secteur), ("direction", direction), ("statut", statut))
+        if valeur
+    }
+    lien = "/bsd/export.csv"
+    if parametres:
+        lien += "?" + urlencode(parametres)
+    export = f'<p><a class="bouton secondaire" href="{echapper(lien)}">Exporter le registre (CSV)</a></p>'
     note = (
         "<p class=\"note\">« En cours d’exécution » regroupe les projets dans les délais, "
         "à risque ou en retard. Suspendu et en préparation n’y entrent pas. "
@@ -361,7 +370,7 @@ def _corps(ctx, resume, projets, attention, responsables, secteur, direction, st
         "<h1>Tableau de bord du BSD</h1>"
         '<p class="chapeau">Bureau de stratégie et de développement. '
         "Suivi des projets des directions.</p>"
-        + bandeau + note + portee + filtres + saisie + indicateur + secteurs + statuts + attentions + registre
+        + bandeau + note + portee + filtres + saisie + export + indicateur + secteurs + statuts + attentions + registre
     )
 
 

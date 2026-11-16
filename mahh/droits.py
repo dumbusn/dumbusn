@@ -216,6 +216,14 @@ def entrees_menu(conn, utilisateur):
     if utilisateur["administrateur"]:
         entrees.append(("/groupes", "Groupes", "groupes"))
         entrees.append(("/utilisateurs", "Utilisateurs", "utilisateurs"))
+        entrees.append(("/journal", "Journal", "journal"))
+    if (
+        est_hierarchie(utilisateur)
+        or peut_voir_ordures(conn, utilisateur)
+        or peut_voir_seg(conn, utilisateur)
+        or peut_voir_snape(conn, utilisateur)
+    ):
+        entrees.append(("/carte", "Carte", "carte"))
     entrees.append(("/compte", "Compte", "compte"))
     return entrees
 

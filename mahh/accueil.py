@@ -22,10 +22,13 @@ from mahh.securite import (
     verifier_ou_factice,
 )
 from mahh.texte import echapper
-from mahh.vitrine import rendu_public
 
 
 def accueil(ctx):
+    if ctx.utilisateur is None:
+        from mahh.site_public import accueil_public
+
+        return page("Accueil", accueil_public(ctx), ctx, actif="accueil")
     cartes = []
     instructions = False
     if ctx.utilisateur is not None:
@@ -48,16 +51,14 @@ def accueil(ctx):
       <a class="bouton" href="/instructions">Ouvrir les instructions</a>
     </article>
     """
-    espace = ""
-    if cartes or instructions:
-        espace = f"""
+    espace = f"""
+    <h1>Accueil</h1>
     <h2>Espace de travail</h2>
     <p class="chapeau">Seules les entrées de votre compte sont affichées.</p>
     {blocs}
     {bloc_instructions}
     """
-    corps = rendu_public(ctx) + espace
-    return page("Accueil", corps, ctx, actif="accueil")
+    return page("Accueil", espace, ctx, actif="accueil")
 
 
 def _cartes(conn, utilisateur):
