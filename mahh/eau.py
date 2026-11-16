@@ -1,4 +1,4 @@
-"""Eau : SEG en ville, SNAPE en zone rurale. Le jeu de départ est un exemple."""
+"""Eau : SEG en ville, SNAPE en zone rurale."""
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from secrets import token_hex
@@ -10,12 +10,6 @@ from mahh.reponse import Interdit, Redirection, ValeurRefusee
 from mahh.securite import maintenant
 from mahh.texte import attribut_pourcent, echapper, fmt_nombre, fmt_pourcent
 from mahh.validation import ligne
-
-BANDEAU = (
-    "Jeu d’exemple. Ces villes, villages, sites, forages et abonnés ne sont pas ceux du ministère. "
-    "Aucun de ces chiffres n’est officiel. SEG reste le sigle de la note. "
-    "SNAPE, Service national d’aménagement des points d’eau, est le développement indiqué par le commanditaire."
-)
 
 
 def page_module(ctx):
@@ -33,7 +27,6 @@ def page_module(ctx):
     corps = (
         _fil()
         + "<h1>Eau : SEG et SNAPE</h1>"
-        + _bandeau()
         + "<p class=\"chapeau\">SEG : distribution d’eau en ville. SNAPE : forages en zone rurale. "
         "Seuls les réseaux ouverts à votre compte sont affichés.</p>"
         + '<p><a class="bouton" href="/eau/demande">Déposer une demande</a></p>'
@@ -56,8 +49,8 @@ def page_demande(ctx, erreur=None, valeurs=None):
     corps = (
         _fil()
         + "<h1>Demande d’eau</h1>"
-        + _bandeau()
         + "<p>Une ville relève du SEG. Un village relève du SNAPE. "
+        "Le service les enregistre d’abord sur son tableau. "
         "Le relevé GPS est saisi : latitude et longitude.</p>"
         + '<form method="post" action="/eau/demande" class="formulaire">'
         + jeton_cache(ctx)
@@ -120,9 +113,7 @@ def page_demande_fiche(ctx, reference, erreur=None):
         ).fetchone()
     corps = (
         _fil()
-        + _pastille(demande["exemple"])
         + f'<h1>{echapper(demande["reference"])}</h1>'
-        + _bandeau()
         + _identite(demande, lieu)
         + _suite_abonnement(ctx, demande, abonnement)
     )
@@ -172,9 +163,7 @@ def page_abonnement(ctx, reference, erreur=None):
         lieu = conn.execute("SELECT * FROM eau_lieu WHERE id = ?", (abonnement["lieu_id"],)).fetchone()
     corps = (
         _fil()
-        + _pastille(abonnement["exemple"])
         + f'<h1>{echapper(abonnement["reference"])}</h1>'
-        + _bandeau()
         + _identite(abonnement, lieu)
         + _paiement(ctx, abonnement)
     )
@@ -196,15 +185,57 @@ def action_payer(ctx, reference):
 def page_seg(ctx):
     with base() as conn:
         _exiger_reseau(ctx, conn, "seg")
-        corps = _tableau_seg(conn)
+        corps = _tableau_seg(conn, ctx)
     return page("Tableau du SEG", corps, ctx, actif="seg")
 
 
 def page_snape(ctx):
     with base() as conn:
         _exiger_reseau(ctx, conn, "snape")
-        corps = _tableau_snape(conn)
+        corps = _tableau_snape(conn, ctx)
     return page("Tableau du SNAPE", corps, ctx, actif="snape")
+
+
+def action_lieu(ctx):
+    exiger_connexion(ctx)
+    reseau = (ctx.formulaire.get("reseau") or "").strip()
+    if reseau not in ("seg", "snape"):
+        raise Interdit("Ce réseau n’est pas reconnu.")
+    try:
+        nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom")
+        population = int(ctx.formulaire.get("population") or "")
+        couverte = int(ctx.formulaire.get("population_couverte") or "")
+    except ValeurRefusee as exc:
+        return _page_reseau(ctx, reseau, exc.message)
+    except ValueError:
+        return _page_reseau(ctx, reseau, "La population est un nombre entier.")
+    if population < 0 or population > 20000000 or couverte < 0 or couverte > population:
+        return _page_reseau(
+            ctx, reseau, "La population couverte ne peut pas dépasser la population."
+        )
+    with base() as conn:
+        if not peut_voir_reseau(conn, ctx.utilisateur, reseau):
+            raise Interdit("Cette structure ne voit que ce qui la concerne.")
+        conn.execute(
+            """
+            INSERT INTO eau_lieu (reseau, nom, population, population_couverte, exemple)
+            VALUES (?, ?, ?, ?, 0)
+            """,
+            (reseau, nom, population, couverte),
+        )
+    return Redirection(f"/eau/{reseau}?message=lieu-enregistre")
+
+
+def _page_reseau(ctx, reseau, erreur):
+    if reseau == "snape":
+        with base() as conn:
+            _exiger_reseau(ctx, conn, "snape")
+            corps = _tableau_snape(conn, ctx)
+        return page("Tableau du SNAPE", corps, ctx, actif="snape", erreur=erreur)
+    with base() as conn:
+        _exiger_reseau(ctx, conn, "seg")
+        corps = _tableau_seg(conn, ctx)
+    return page("Tableau du SEG", corps, ctx, actif="seg", erreur=erreur)
 
 
 def page_prevu(ctx):
@@ -215,7 +246,7 @@ def page_prevu(ctx):
     return Redirection("/eau")
 
 
-def _tableau_seg(conn):
+def _tableau_seg(conn, ctx):
     lieux = conn.execute("SELECT * FROM eau_lieu WHERE reseau = 'seg' ORDER BY nom").fetchall()
     sites = conn.execute(
         """
@@ -266,25 +297,30 @@ def _tableau_seg(conn):
         f'GPS {echapper(site["latitude"])}, {echapper(site["longitude"])}</li>'
         for site in sites
     )
+    if not lieux:
+        return (
+            _fil()
+            + "<h1>Tableau du SEG</h1>"
+            + "<p>Distribution d’eau en ville. L’organigramme et les attributions se règlent dans Directions.</p>"
+            + '<p class="vide">Aucune ville enregistrée. Le SEG indique la ville, la population, '
+            "la population desservie et les sites d’approvisionnement.</p>"
+            + _forme_lieu(ctx, "seg", "une ville")
+        )
     return (
         _fil()
         + "<h1>Tableau du SEG</h1>"
-        + _bandeau()
         + "<p>Distribution d’eau en ville. L’organigramme et les attributions se règlent dans Directions.</p>"
-        + "<p class=\"aide\">Taux d’abonnement et nombre de sites d’approvisionnement : demandés par le commanditaire, "
-        "absents de la note. Taux d’abonnement = abonnés payants / population des villes. "
-        "Taux de desserte urbain = population desservie déclarée / population des villes. "
-        "Taux de facturation = montant facturé / montant dû. "
-        "Taux de recouvrement = montant recouvré / montant facturé. "
-        "La note ne donne pas ces formules. Les volumes et les montants viennent de la situation d’exemple, "
-        "pas d’une somme abonné par abonné.</p>"
+        + "<p class=\"aide\">Ces taux sont calculés sur les données saisies par le service. "
+        "Taux d’abonnement = abonnés payants / population des villes. "
+        "Taux de desserte urbain = population desservie déclarée / population des villes.</p>"
         + indicateurs
-        + "<h2>La liste des villes couvertes</h2><ul>" + liste + "</ul>"
-        + "<h2>Sites d’approvisionnement</h2><ul>" + points + "</ul>"
+        + "<h2>La liste des villes couvertes</h2><ul>" + (liste or "<li>Aucune ville couverte saisie.</li>") + "</ul>"
+        + "<h2>Sites d’approvisionnement</h2><ul>" + (points or "<li>Aucun site saisi.</li>") + "</ul>"
+        + _forme_lieu(ctx, "seg", "une ville")
     )
 
 
-def _tableau_snape(conn):
+def _tableau_snape(conn, ctx):
     lieux = conn.execute("SELECT * FROM eau_lieu WHERE reseau = 'snape' ORDER BY nom").fetchall()
     items = []
     total_points = 0
@@ -306,15 +342,24 @@ def _tableau_snape(conn):
             f'<p>Nombre de points d’eau realisés par village : {len(points)}</p>'
             f"<ul>{forages}</ul></article>"
         )
+    if not lieux:
+        return (
+            _fil()
+            + "<h1>Tableau du SNAPE</h1>"
+            + "<p>Forages en zone rurale. L’organigramme et les attributions se règlent dans Directions.</p>"
+            + '<p class="vide">Aucun village enregistré. Le SNAPE indique le village, '
+            "la population couverte et les points d’eau réalisés.</p>"
+            + _forme_lieu(ctx, "snape", "un village")
+        )
     return (
         _fil()
         + "<h1>Tableau du SNAPE</h1>"
-        + _bandeau()
         + "<p>Forages en zone rurale. L’organigramme et les attributions se règlent dans Directions.</p>"
         + f'<p data-villages="{len(lieux)}" data-points="{total_points}">'
         + f"Nombre de villages couvert : {len(lieux)}. "
         + f"Points d’eau realisés : {total_points}.</p>"
         + "".join(items)
+        + _forme_lieu(ctx, "snape", "un village")
     )
 
 
@@ -322,14 +367,20 @@ def _fil():
     return '<p class="fil"><a href="/">Accueil</a> · <a href="/eau">Eau</a></p>'
 
 
-def _bandeau():
-    return f'<p class="bandeau bandeau-exemple" data-bandeau="exemple">{echapper(BANDEAU)}</p>'
-
-
-def _pastille(exemple):
-    if exemple:
-        return '<p class="badge-exemple" data-genre="exemple">exemple fictif</p>'
-    return '<p class="badge-saisie" data-genre="saisie">saisie</p>'
+def _forme_lieu(ctx, reseau, libelle):
+    return (
+        f"<h2>Enregistrer {echapper(libelle)}</h2>"
+        + '<form method="post" action="/eau/lieu" class="formulaire">'
+        + jeton_cache(ctx)
+        + f'<input type="hidden" name="reseau" value="{reseau}">'
+        + "<label for=\"nom-lieu\">Nom</label>"
+        + '<input id="nom-lieu" name="nom" required maxlength="80">'
+        + '<label for="population">Population</label>'
+        + '<input id="population" name="population" required inputmode="numeric">'
+        + '<label for="population-couverte">Population desservie</label>'
+        + '<input id="population-couverte" name="population_couverte" required inputmode="numeric">'
+        + '<button type="submit">Enregistrer</button></form>'
+    )
 
 
 def _options_lieux(conn, utilisateur, choisi):

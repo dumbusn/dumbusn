@@ -53,8 +53,6 @@ def accueil(ctx):
         espace = f"""
     <h2>Espace de travail</h2>
     <p class="chapeau">Seules les entrées de votre compte sont affichées.</p>
-    <p class="bandeau bandeau-exemple" data-accueil="exemples">Les projets affichés sont des exemples fictifs.
-    Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.</p>
     {blocs}
     {bloc_instructions}
     """
@@ -92,7 +90,7 @@ def _cartes(conn, utilisateur):
       <article class="carte" data-bloc="ordures">
         <p class="etat etat-ouvert">En service</p>
         <h2>Collecte des ordures</h2>
-        <p>Abonnement, paiement, tournées et signalement. Le jeu chargé au départ est un exemple fictif.</p>
+        <p>Abonnement, paiement, tournées et signalement. L’ANASP y enregistre les localités, les PME et les abonnés.</p>
         <a class="bouton" href="/ordures">Ouvrir la collecte</a>
       </article>
             """
@@ -103,7 +101,7 @@ def _cartes(conn, utilisateur):
       <article class="carte" data-bloc="seg">
         <p class="etat etat-ouvert">En service</p>
         <h2>SEG</h2>
-        <p>Distribution d’eau en ville. Demande, abonnement et tableau. Le jeu chargé est un exemple fictif.</p>
+        <p>Distribution d’eau en ville. Le SEG y indique les villes, les sites et les abonnements.</p>
         <a class="bouton" href="/eau/seg">Ouvrir le SEG</a>
       </article>
             """
@@ -114,7 +112,7 @@ def _cartes(conn, utilisateur):
       <article class="carte" data-bloc="snape">
         <p class="etat etat-ouvert">En service</p>
         <h2>SNAPE</h2>
-        <p>Forages en zone rurale. Demande, abonnement et tableau. Le jeu chargé est un exemple fictif.</p>
+        <p>Forages en zone rurale. Le SNAPE y indique les villages, la population couverte et les points d’eau.</p>
         <a class="bouton" href="/eau/snape">Ouvrir le SNAPE</a>
       </article>
             """

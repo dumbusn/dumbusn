@@ -1,4 +1,4 @@
-"""Collecte des ordures. Les lignes exemple restent fictives. PME n’est pas développé."""
+"""Collecte des ordures. PME n’est pas développé."""
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from secrets import token_hex
@@ -21,10 +21,12 @@ GENRES = {
 }
 GESTIONS = {"commune": "Commune", "gouvernorat": "Gouvernorat"}
 MONTANT_ABONNEMENT = "50000"
-BANDEAU = (
-    "Jeu d’exemple. Ces lieux, ces PME, ces points et ces abonnés ne sont pas ceux du ministère. "
-    "Aucun de ces chiffres n’est officiel. PME reste un sigle : la note ne le développe pas."
-)
+PARENT_GENRE = {
+    "prefecture": "region",
+    "sous_prefecture": "prefecture",
+    "quartier": "sous_prefecture",
+    "secteur": "quartier",
+}
 
 
 def _garder(ctx):
@@ -38,9 +40,6 @@ def page_module(ctx):
     _garder(ctx)
     with base() as conn:
         nombre = conn.execute("SELECT COUNT(*) AS n FROM abonnement").fetchone()["n"]
-        exemples = conn.execute(
-            "SELECT COUNT(*) AS n FROM abonnement WHERE exemple = 1"
-        ).fetchone()["n"]
     suite = ""
     if ctx.utilisateur is not None:
         suite = (
@@ -49,16 +48,24 @@ def page_module(ctx):
             '<a class="bouton secondaire" href="/ordures/points">Points de collecte ANASP</a> '
             '<a class="bouton secondaire" href="/ordures/abonnes">Abonnés</a></p>'
         )
+    if nombre == 0:
+        compte = (
+            '<p class="vide" data-abonnes="0">Aucun abonnement enregistré. '
+            "L’ANASP enregistre d’abord les localités et les PME, puis les abonnements.</p>"
+        )
+    else:
+        compte = (
+            f'<p data-abonnes="{nombre}">{nombre} abonnement'
+            + ("s" if nombre != 1 else "")
+            + ".</p>"
+        )
     corps = (
         _fil()
         + "<h1>Collecte des ordures</h1>"
-        + _bandeau()
         + "<p class=\"chapeau\">Abonnement de la population, paiement, tournée et signalement "
         "« poubelle pleine ». Les jours, les heures et le contact sont communiqués à l’abonné "
         "dès l’inscription.</p>"
-        + f'<p data-abonnes="{nombre}" data-exemples="{exemples}">{nombre} abonnement'
-        + ("s" if nombre != 1 else "")
-        + f", dont {exemples} marqué" + ("s" if exemples != 1 else "") + " exemple.</p>"
+        + compte
         + '<p><a class="bouton" href="/ordures/abonnement">S’abonner</a></p>'
         + _recherche(ctx)
         + suite
@@ -71,10 +78,11 @@ def page_abonnement(ctx, erreur=None, valeurs=None):
     valeurs = valeurs or {}
     with base() as conn:
         options = _options_secteurs(conn, valeurs.get("secteur_id"))
+        localites = _forme_localite(ctx, conn)
     corps = (
         _fil()
         + "<h1>Abonnement</h1>"
-        + _bandeau()
+        + localites
         + "<p>L’abonné indique son rattachement, du plus large au plus fin, et le relevé GPS "
         "de l’inscription : latitude et longitude. Le montant est enregistré dans l’application. "
         "Ce n’est pas un paiement bancaire.</p>"
@@ -138,6 +146,40 @@ def action_abonnement(ctx):
     return Redirection(f"/ordures/a/{reference}?message=abonnement-cree")
 
 
+def action_localite(ctx):
+    _garder(ctx)
+    genre = (ctx.formulaire.get("genre") or "").strip()
+    if genre not in GENRES:
+        return page_abonnement(ctx, erreur="Le niveau de localité n’est pas reconnu.")
+    try:
+        nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom")
+        parent_brut = (ctx.formulaire.get("parent_id") or "").strip()
+        parent_id = int(parent_brut) if parent_brut else None
+    except ValeurRefusee as exc:
+        return page_abonnement(ctx, erreur=exc.message)
+    except ValueError:
+        return page_abonnement(ctx, erreur="Le rattachement n’est pas reconnu.")
+    with base() as conn:
+        if genre == "region":
+            if parent_id is not None:
+                return page_abonnement(ctx, erreur="Une région n’a pas de rattachement.")
+        else:
+            parent = conn.execute(
+                "SELECT genre FROM maille WHERE id = ?",
+                (parent_id,),
+            ).fetchone()
+            if parent is None or parent["genre"] != PARENT_GENRE[genre]:
+                return page_abonnement(
+                    ctx,
+                    erreur="Le rattachement doit être le niveau juste au-dessus.",
+                )
+        conn.execute(
+            "INSERT INTO maille (parent_id, genre, nom, exemple) VALUES (?, ?, ?, 0)",
+            (parent_id, genre, nom),
+        )
+    return Redirection("/ordures/abonnement?message=localite-enregistree")
+
+
 def page_fiche(ctx, reference, erreur=None):
     _garder(ctx)
     with base() as conn:
@@ -159,11 +201,7 @@ def page_fiche(ctx, reference, erreur=None):
     hors = _hors_jour(pme, ctx.aujourd_hui)
     corps = (
         _fil()
-        + f'<p class="badge-{"exemple" if abonne["exemple"] else "saisie"}" data-genre="{"exemple" if abonne["exemple"] else "saisie"}">'
-        + ("exemple fictif" if abonne["exemple"] else "saisie")
-        + "</p>"
         + f'<h1>{echapper(abonne["reference"])}</h1>'
-        + _bandeau()
         + "<h2>Abonné</h2>"
         + _liste([
             ("Nom", abonne["nom"]),
@@ -275,15 +313,22 @@ def page_pme(ctx, erreur=None):
                 (pme["id"], jour),
             ).fetchall()
             blocs.append(_carte_pme(pme, libelles, effectifs, trajets))
+        vide = ""
+        if not pmes:
+            vide = (
+                '<p class="vide">Aucune PME enregistrée. Indiquez le nom, la gestion, '
+                "le jour de collecte, le contact et le secteur.</p>"
+            )
         corps = (
             _fil()
             + "<h1>PME, effectifs et trajets</h1>"
-            + _bandeau()
             + "<p>Les PME sont gérées par les communes ou par le gouvernorat. "
             "Une PME peut couvrir plusieurs secteurs ou quartiers. "
             f"Effectifs et trajets du {echapper(_jour_long(ctx.aujourd_hui))}.</p>"
+            + vide
+            + _forme_pme(ctx, conn)
             + "".join(blocs)
-            + _forme_suivi(ctx, pmes)
+            + (_forme_suivi(ctx, pmes) if pmes else "")
         )
     return page("PME", corps, ctx, actif="ordures", erreur=erreur)
 
@@ -325,29 +370,72 @@ def action_suivi(ctx):
     return Redirection("/ordures/pme?message=suivi-enregistre")
 
 
+def action_pme(ctx):
+    _garder(ctx)
+    gestion = (ctx.formulaire.get("gestion") or "").strip()
+    jour_collecte = (ctx.formulaire.get("jour_collecte") or "").strip()
+    if gestion not in GESTIONS:
+        return page_pme(ctx, erreur="La gestion n’est pas reconnue.")
+    if jour_collecte not in JOURS:
+        return page_pme(ctx, erreur="Le jour de collecte n’est pas reconnu.")
+    try:
+        nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom")
+        contact = _telephone(ctx.formulaire.get("contact"))
+        heure = ligne(ctx.formulaire.get("heure_collecte"), 2, 40, "Heure")
+        frais = _montant(ctx.formulaire.get("frais_hors_jour"))
+        secteur_id = int(ctx.formulaire.get("secteur_id") or "0")
+    except ValeurRefusee as exc:
+        return page_pme(ctx, erreur=exc.message)
+    except ValueError:
+        return page_pme(ctx, erreur="Le secteur n’est pas reconnu.")
+    with base() as conn:
+        secteur = conn.execute(
+            "SELECT id FROM maille WHERE id = ? AND genre = 'secteur'",
+            (secteur_id,),
+        ).fetchone()
+        if secteur is None:
+            return page_pme(ctx, erreur="Choisissez un secteur.")
+        curseur = conn.execute(
+            """
+            INSERT INTO pme (
+                nom, gestion, contact, jour_collecte, heure_collecte, frais_hors_jour, exemple
+            ) VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            (nom, gestion, contact, jour_collecte, heure, frais),
+        )
+        conn.execute(
+            "INSERT INTO pme_secteur (pme_id, secteur_id) VALUES (?, ?)",
+            (curseur.lastrowid, secteur_id),
+        )
+    return Redirection("/ordures/pme?message=pme-enregistree")
+
+
 def page_points(ctx):
     _garder(ctx)
     with base() as conn:
         points = conn.execute("SELECT * FROM point_collecte ORDER BY nom").fetchall()
         lignes = []
         for point in points:
-            chaine = " — ".join(m["nom"] for m in _chaine(conn, point["secteur_id"]))
-            pastille = "exemple" if point["exemple"] else "saisie"
+            chaine = " — ".join(m["nom"] for m in _chaine(conn, point["secteur_id"])) if point["secteur_id"] else ""
             lignes.append(
-                f'<tr data-point="{echapper(point["nom"])}" data-exemple="{point["exemple"]}">'
+                f'<tr data-point="{echapper(point["nom"])}">'
                 f'<td>{echapper(point["nom"])}</td>'
                 f'<td>{echapper(point["latitude"])}, {echapper(point["longitude"])}</td>'
-                f"<td>{echapper(chaine)}</td>"
-                f"<td>{pastille}</td></tr>"
+                f"<td>{echapper(chaine)}</td></tr>"
             )
+    vide = ""
+    if not lignes:
+        vide = (
+            '<p class="vide">Aucun point de collecte enregistré. '
+            "L’ANASP indique le nom du point, le secteur et le relevé GPS.</p>"
+        )
     corps = (
         _fil()
         + "<h1>Points de collecte ANASP</h1>"
-        + _bandeau()
-        + "<p>Points de l’Agence nationale d’assainissement et de la salubrité publique, avec GPS. "
-        "Ce développement du sigle vient du commanditaire, pas de la note.</p>"
+        + "<p>Points de l’Agence nationale d’assainissement et de la salubrité publique, avec GPS.</p>"
+        + vide
         + "<table><caption>Points</caption><thead><tr>"
-        "<th>Point</th><th>GPS</th><th>Rattachement</th><th></th></tr></thead><tbody>"
+        "<th>Point</th><th>GPS</th><th>Rattachement</th></tr></thead><tbody>"
         + "".join(lignes)
         + "</tbody></table>"
     )
@@ -363,17 +451,18 @@ def page_abonnes(ctx):
     items = []
     for ligne_abonne in lignes:
         etat = "payé" if ligne_abonne["paye"] else "non payé"
-        pastille = "exemple" if ligne_abonne["exemple"] else "saisie"
         items.append(
             f'<li data-reference="{echapper(ligne_abonne["reference"])}">'
             f'<a href="/ordures/a/{echapper(ligne_abonne["reference"])}">{echapper(ligne_abonne["reference"])}</a> '
-            f'{echapper(ligne_abonne["nom"])} — {etat} — {pastille}</li>'
+            f'{echapper(ligne_abonne["nom"])} — {etat}</li>'
         )
+    liste = "<ul>" + "".join(items) + "</ul>" if items else (
+        '<p class="vide">Aucun abonné enregistré.</p>'
+    )
     corps = (
         _fil()
         + "<h1>Abonnés</h1>"
-        + _bandeau()
-        + "<ul>" + "".join(items) + "</ul>"
+        + liste
     )
     return page("Abonnés", corps, ctx, actif="ordures")
 
@@ -387,8 +476,69 @@ def _fil():
     return '<p class="fil"><a href="/">Accueil</a> · <a href="/ordures">Collecte des ordures</a></p>'
 
 
-def _bandeau():
-    return f'<p class="bandeau bandeau-exemple" data-bandeau="exemple">{echapper(BANDEAU)}</p>'
+def _forme_localite(ctx, conn):
+    genres = "".join(
+        f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in GENRES.items()
+    )
+    parents = ['<option value="">Aucune, pour une région</option>']
+    for maille in conn.execute("SELECT id, genre, nom FROM maille ORDER BY nom").fetchall():
+        parents.append(
+            f'<option value="{int(maille["id"])}">'
+            f'{echapper(GENRES[maille["genre"]])} — {echapper(maille["nom"])}</option>'
+        )
+    return (
+        "<h2>Localité</h2>"
+        "<p>Indiquez d’abord la région, puis la préfecture, la commune, le quartier et le secteur.</p>"
+        '<form method="post" action="/ordures/localite" class="formulaire">'
+        + jeton_cache(ctx)
+        + '<label for="genre-localite">Niveau</label>'
+        + f'<select id="genre-localite" name="genre" required>{genres}</select>'
+        + '<label for="parent-localite">Rattachement</label>'
+        + f'<select id="parent-localite" name="parent_id">{"".join(parents)}</select>'
+        + '<label for="nom-localite">Nom</label>'
+        + '<input id="nom-localite" name="nom" required maxlength="80">'
+        + '<button type="submit">Enregistrer la localité</button></form>'
+    )
+
+
+def _forme_pme(ctx, conn):
+    gestions = "".join(
+        f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in GESTIONS.items()
+    )
+    jours = "".join(f'<option value="{jour}">{echapper(jour)}</option>' for jour in JOURS)
+    secteurs = ['<option value="">Choisir un secteur</option>']
+    for secteur in conn.execute(
+        "SELECT id, nom FROM maille WHERE genre = 'secteur' ORDER BY nom"
+    ).fetchall():
+        secteurs.append(
+            f'<option value="{int(secteur["id"])}">{echapper(secteur["nom"])}</option>'
+        )
+    return (
+        "<h2>Enregistrer une PME</h2>"
+        '<form method="post" action="/ordures/pme/enregistrer" class="formulaire">'
+        + jeton_cache(ctx)
+        + '<label for="nom-pme">Nom</label><input id="nom-pme" name="nom" required maxlength="80">'
+        + '<label for="gestion-pme">Gestion</label>'
+        + f'<select id="gestion-pme" name="gestion" required>{gestions}</select>'
+        + '<label for="contact-pme">Contact</label>'
+        + '<input id="contact-pme" name="contact" required maxlength="20">'
+        + '<label for="jour-pme">Jour de collecte</label>'
+        + f'<select id="jour-pme" name="jour_collecte" required>{jours}</select>'
+        + '<label for="heure-pme">Heure</label>'
+        + '<input id="heure-pme" name="heure_collecte" required maxlength="40">'
+        + '<label for="frais-pme">Frais hors jour (GNF)</label>'
+        + '<input id="frais-pme" name="frais_hors_jour" required inputmode="numeric">'
+        + '<label for="secteur-pme">Secteur</label>'
+        + f'<select id="secteur-pme" name="secteur_id" required>{"".join(secteurs)}</select>'
+        + '<button type="submit">Enregistrer la PME</button></form>'
+    )
+
+
+def _montant(valeur):
+    texte = ligne(valeur, 1, 12, "Frais hors jour")
+    if not texte.isdigit():
+        raise ValeurRefusee("Les frais hors jour sont un nombre entier de francs.")
+    return texte
 
 
 def _recherche(ctx):
@@ -471,10 +621,9 @@ def _passages(ctx, abonne, passages):
     if passages:
         items = []
         for passage in passages:
-            pastille = "exemple" if passage["exemple"] else "saisie"
             items.append(
                 f"<li>{echapper(passage['agent'])} — {echapper(passage['jour'])} {echapper(passage['heure'])} — "
-                f"GPS {echapper(passage['latitude'])}, {echapper(passage['longitude'])} — {pastille}</li>"
+                f"GPS {echapper(passage['latitude'])}, {echapper(passage['longitude'])}</li>"
             )
         liste = "<ul>" + "".join(items) + "</ul>"
     else:
@@ -510,10 +659,7 @@ def _signalements(ctx, abonne, pme, hors, signalements):
     items = []
     for signalement in signalements:
         frais = _fmt_gnf(signalement["frais_gnf"]) if int(signalement["frais_gnf"]) else "aucun frais"
-        pastille = "exemple" if signalement["exemple"] else "saisie"
-        items.append(
-            f"<li>{echapper(signalement['jour'])} — {frais} — {pastille}</li>"
-        )
+        items.append(f"<li>{echapper(signalement['jour'])} — {frais}</li>")
     liste = "<ul>" + "".join(items) + "</ul>" if items else "<p>Aucun signalement.</p>"
     return (
         intro
@@ -525,18 +671,17 @@ def _signalements(ctx, abonne, pme, hors, signalements):
 
 
 def _carte_pme(pme, libelles, effectifs, trajets):
-    pastille = "exemple" if pme["exemple"] else "saisie"
     effectif = ", ".join(
-        f'{ligne["nombre"]} ({"exemple" if ligne["exemple"] else "saisie"})' for ligne in effectifs
+        str(ligne["nombre"]) for ligne in effectifs
     ) or "aucun effectif saisi pour ce jour"
     trajet = "".join(
-        f'<li>{echapper(ligne["libelle"])} ({"exemple" if ligne["exemple"] else "saisie"})</li>'
+        f'<li>{echapper(ligne["libelle"])}</li>'
         for ligne in trajets
     ) or "<li>Aucun trajet saisi pour ce jour.</li>"
     return (
         f'<article class="carte" data-pme="{echapper(pme["nom"])}" data-gestion="{echapper(pme["gestion"])}">'
         f"<h2>{echapper(pme['nom'])}</h2>"
-        f"<p>{echapper(GESTIONS.get(pme['gestion'], pme['gestion']))} — {pastille}</p>"
+        f"<p>{echapper(GESTIONS.get(pme['gestion'], pme['gestion']))}</p>"
         f"<p>Contact {echapper(pme['contact'])}. Collecte le {echapper(pme['jour_collecte'])}, "
         f"{echapper(pme['heure_collecte'])}. Frais hors jour : {echapper(_fmt_gnf(pme['frais_hors_jour']))}.</p>"
         f"<p>Secteurs ou quartiers : {echapper(' ; '.join(libelles))}</p>"

@@ -19,7 +19,10 @@ AVIS = {
     ),
     "utilisateur-desactive": "Le compte a été désactivé.",
     "mot-de-passe-change": "Le mot de passe a été changé. Connectez-vous à nouveau.",
-    "projet-cree": "Le projet a été ajouté au registre. Il n’est pas marqué exemple.",
+    "projet-cree": "Le projet a été ajouté au registre.",
+    "localite-enregistree": "La localité a été enregistrée.",
+    "pme-enregistree": "La PME a été enregistrée.",
+    "lieu-enregistre": "Le lieu a été enregistré.",
     "projet-modifie": "Le projet a été modifié.",
     "projet-supprime": "Le projet a été retiré du registre.",
     "projet-rattache": "Le rattachement a été enregistré.",
@@ -118,9 +121,9 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
     {bandeau}
     {corps}
   </main>
-  {"" if utilisateur is None else '''<footer>
-    <p>Socle local. Les projets marqués « exemple » sont fictifs et ne sont pas ceux du ministère.</p>
-  </footer>'''}
+  <footer>
+    <p>Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures — République de Guinée.</p>
+  </footer>
 </body>
 </html>"""
     return Html(document, statut)

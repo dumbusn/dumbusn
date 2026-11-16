@@ -151,7 +151,7 @@ def _rubrique(genre, titre, blocs):
             "</article>"
         )
     if not articles:
-        articles.append("<p>Aucun texte dans cette rubrique.</p>")
+        articles.append("<p>Aucun texte publié. La cellule de communication le rédige.</p>")
     return f'<section class="rubrique" data-rubrique="{genre}"><h2>{echapper(titre)}</h2>{"".join(articles)}</section>'
 
 

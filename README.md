@@ -4,7 +4,7 @@ Socle local de l’application unique du Ministère de l’Assainissement, de l�
 
 Les quatre blocs sont en service : la gestion documentaire des directions, le tableau de bord du BSD, la collecte des ordures, et l’eau (SEG en ville, SNAPE en zone rurale). Une page d’instructions suit le circuit du ministre au chef de cabinet, au secrétaire général, puis aux directions. Le ministre, le secrétaire général, le chef de cabinet et le BSD ont l’accès complet. À partir du directeur, le compte ne voit que sa direction.
 
-Les dix-huit projets chargés au premier lancement sont un **exemple fictif**, repris d’un classeur de démonstration. Ce ne sont pas les projets du ministère, et les totaux ne sont pas des chiffres officiels.
+Le registre des projets, les actualités, les communiqués et les tableaux de la collecte, du SEG et du SNAPE restent vides tant que les services n’ont pas saisi leurs données.
 
 ## Lancer
 
@@ -16,7 +16,7 @@ python3 -m mahh
 
 Puis ouvrir http://127.0.0.1:8000/
 
-Après la connexion, la première page est l’accueil : les quatre blocs, la page d’instructions, et le rappel que les projets affichés sont des exemples. Le bouton Accueil, en tête de chaque page, y ramène.
+Après la connexion, la première page est l’accueil : les quatre blocs et la page d’instructions. Le bouton Accueil, en tête de chaque page, y ramène.
 
 Au premier lancement, le compte administrateur est créé.
 
@@ -54,8 +54,8 @@ Le test crée une base temporaire, se connecte, ouvre une direction, crée un do
 - Comptes, session, et un administrateur qui crée les groupes et accorde les privilèges.
 - Arbre des domaines et des structures de la note du 10 novembre 2026. Les sigles qu’elle ne développe pas restent des sigles.
 - Dossiers et fichiers, avec créer, consulter, modifier, supprimer par groupe.
-- Écran BSD : registre filtrable, indicateurs du classeur, jeu d’exemple marqué. Le code d’un projet ouvre ses notes, ses rapports et le classement des documents physiques.
+- Écran BSD : registre filtrable. Le code d’un projet ouvre ses notes, ses rapports et le classement des documents physiques. Le BSD saisit les projets.
 - Page d’instructions, et sommation d’une direction en retard depuis cette page.
 - Accès complet pour la hiérarchie et le BSD ; vue limitée au rattachement pour une direction.
-- Collecte des ordures : abonnement, paiement enregistré, GPS, rattachement, PME, points ANASP, agents, signalement. Le jeu de départ est un exemple.
-- Eau : demande et abonnement SEG et SNAPE, tableaux avec les libellés de la note. Le jeu de départ est un exemple. La hiérarchie et le BSD voient les deux. Chaque structure ne voit que le sien.
+- Collecte des ordures : localités, PME, abonnement, paiement enregistré, GPS, agents, signalement. L’ANASP saisit ces éléments.
+- Eau : demande et abonnement SEG et SNAPE. Chaque service saisit ses villes ou ses villages. La hiérarchie et le BSD voient les deux. Chaque structure ne voit que le sien.

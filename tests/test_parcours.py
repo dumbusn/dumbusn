@@ -168,7 +168,8 @@ def parcours(hote, numero):
     statut, _, page, _ = anonyme.appel("GET", "/")
     verifie(statut == 200 and "<h1>Accueil</h1>" in page and "<nav" not in page, "accueil public sans session")
     verifie('data-rubrique="presentation"' in page and 'data-rubrique="actualite"' in page, "présentation et actualités")
-    verifie('data-rubrique="communique"' in page and "Plan de mobilisation des parties prenantes" in page, "communiqués publics")
+    verifie('data-rubrique="communique"' in page and "Aucun texte publié" in page, "communiqués à rédiger")
+    verifie("Arafan" not in page and "Aboubacar" not in page and "2,6" not in page, "pas de communiqué chiffré")
     verifie("République de Guinée" in page and "Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures" in page, "en-tête du ministère")
     verifie("Texte d’exemple" not in page and "exemple fictif" not in page, "plus de mention d’exemple")
     verifie("ne sont pas ceux" not in page and "ne sont pas celles" not in page, "bannière retirée")
@@ -194,7 +195,7 @@ def parcours(hote, numero):
     verifie("Directions et dossiers" in page and "Tableau du BSD" in page, "blocs en service")
     verifie("Collecte des ordures" in page and ">SEG<" in page and ">SNAPE<" in page, "blocs eau séparés")
     verifie("Ouvrir les instructions" in page, "accès aux instructions depuis l’accueil")
-    verifie("Les projets affichés sont des exemples" in page, "rappel exemples")
+    verifie("exemple fictif" not in page and "jeu d’exemple" not in page, "accueil sans jeu d’exemple")
     verifie("Pas construit" not in page, "les quatre blocs sont en service")
     verifie('href="/ordures"' in page and "Ouvrir la collecte" in page, "accueil ouvre la collecte")
     verifie('href="/eau/seg"' in page and 'href="/eau/snape"' in page, "accueil ouvre SEG et SNAPE")
@@ -361,29 +362,10 @@ def parcours(hote, numero):
     verifie(statut == 403 and "expiré" in refuse, "jeton refusé")
 
     _, _, bsd, _ = admin.appel("GET", "/bsd")
-    verifie("Ce ne sont pas les projets du ministère" in bsd, "bannière exemple")
-    verifie("pas des chiffres officiels" in bsd, "chiffres non officiels")
-    verifie(indiquer(bsd, "projets") == "18", "écran : 18 projets")
-    verifie(indiquer(bsd, "en-cours") == "12", "écran : en cours")
-    verifie(attribut(bsd, "budget", "montant") == "4590.00", "écran : budget")
-    verifie(attribut(bsd, "decaisse", "montant") == "2103.05", "écran : décaissé")
-    verifie(attribut(bsd, "avancement", "taux") == "45.5", "écran : avancement")
-    verifie(attribut(bsd, "decaissement", "taux") == "45.8", "écran : décaissement")
-    verifie('data-bandeau="exemple"' in bsd, "bandeau exemple")
-    attention = re.search(r'data-attention>(.*?)</ol>', bsd, re.S).group(1)
-    verifie(
-        re.findall(r'data-code="([^"]+)"', attention)
-        == ["HYC-03", "ASS-02", "HYD-03", "HYD-02", "HYC-04", "ASS-06"],
-        "ordre à l'écran",
-    )
-    _, _, filtre, _ = admin.appel("GET", "/bsd?secteur=Hydraulique")
-    verifie(indiquer(filtre, "projets") == "6", "filtre hydraulique")
-    verifie("ASS-01" not in filtre, "filtre hydraulique sans assainissement")
-    _, _, cellule, _ = admin.appel(
-        "GET", "/bsd?direction=Cellule%20informatique%20et%20statistiques"
-    )
-    verifie(indiquer(cellule, "projets") == "1", "filtre direction")
-    verifie("HYC-04" in cellule and "HYC-01" not in cellule, "seule la cellule")
+    verifie("Aucun projet enregistré" in bsd, "registre vide")
+    verifie(indiquer(bsd, "projets") == "0", "écran : aucun projet")
+    verifie('data-bandeau="vide"' in bsd, "état vide")
+    verifie("ASS-01" not in bsd and "exemple fictif" not in bsd, "pas de projet d’exemple")
     _, _, vide, _ = admin.appel("GET", "/bsd?secteur=Administration")
     verifie(indiquer(vide, "projets") == "0", "administration vide")
     verifie('data-bandeau="vide"' in vide, "filtre vide")
@@ -406,22 +388,15 @@ def parcours(hote, numero):
             "responsable": "BSD",
             "financement": "Budget national",
             "jalon": "Note de cadrage",
-            "observations": "Saisie de test, hors du jeu d'exemple.",
+            "observations": "Saisie de test.",
             "jeton": jeton(saisie),
         },
     )
-    verifie('data-genre="saisie"' in fiche, "la saisie n'est pas un exemple")
-    projet_id = re.search(r"/bsd/projet/(\d+)", chemin).group(1)
+    verifie("TEST-01" in fiche and "Saisie de test." in fiche, "la saisie est au registre")
+    verifie("exemple fictif" not in fiche and "jeu d’exemple" not in fiche, "pas de pastille d’exemple")
     _, _, melange, _ = admin.appel("GET", "/bsd")
-    verifie('data-bandeau="mixte"' in melange, "le total mélange exemple et saisie")
-    _, _, saisie, _ = admin.appel("GET", f"/bsd/projet/{projet_id}")
-    admin.appel(
-        "POST",
-        f"/bsd/projet/{projet_id}/supprimer",
-        {"jeton": jeton(saisie)},
-    )
-    _, _, retour, _ = admin.appel("GET", "/bsd")
-    verifie(indiquer(retour, "projets") == "18", "retour à 18 après suppression")
+    verifie(indiquer(melange, "projets") == "1", "un projet saisi")
+    verifie("TEST-01" in melange and "ASS-01" not in melange, "seul le projet saisi")
 
     parcours_ordures(admin, hote, numero)
     parcours_eau(admin, hote, numero)
@@ -493,7 +468,7 @@ def parcours(hote, numero):
 
     _, _, registre, _ = admin.appel("GET", "/bsd")
     verifie("Un clic sur le code ouvre" in registre, "le code ouvre le dossier")
-    lien = re.search(r'href="(/bsd/projet/\d+)">ASS-01', registre)
+    lien = re.search(r'href="(/bsd/projet/\d+)">TEST-01', registre)
     verifie(lien is not None, "code cliquable")
     _, _, dossier, _ = admin.appel("GET", lien.group(1))
     verifie("Notes" in dossier and "Rapports" in dossier, "notes et rapports")
@@ -563,8 +538,8 @@ def parcours(hote, numero):
         {"identifiant": "bsd", "mot_de_passe": "bsd-socle-2026", "jeton": jeton(page)},
     )
     _, _, bsd_vue, _ = bsd_compte.appel("GET", "/bsd")
-    verifie(indiquer(bsd_vue, "projets") == "18", "le BSD voit tous les projets")
-    verifie("ASS-01" in bsd_vue, "le BSD voit ASS-01")
+    verifie(indiquer(bsd_vue, "projets") == "1", "le BSD voit le projet saisi")
+    verifie("TEST-01" in bsd_vue, "le BSD voit TEST-01")
 
     _, _, directions, _ = admin.appel("GET", "/directions")
     dga = re.search(r'/noeud/(\d+)" data-nom="DGA"', directions).group(1)
@@ -754,6 +729,17 @@ def parcours_vitrine(admin, direction, hote, numero):
     verifie('href="/communication"' in _nav(accueil_cellule), "la cellule voit la communication")
     verifie("/ordures" not in _nav(accueil_cellule) and "/eau/seg" not in _nav(accueil_cellule), "la cellule n’a pas le menu métier")
     _, _, edition, _ = cellule.appel("GET", "/communication")
+    _, _, edition, _ = cellule.appel(
+        "POST",
+        "/communication",
+        {
+            "genre": "communique",
+            "titre": "Avis de la cellule",
+            "publie_le": "2026-11-12",
+            "texte": "Communiqué rédigé par la cellule de communication.",
+            "jeton": jeton(edition),
+        },
+    )
     bloc = re.search(
         r'data-bloc="(\d+)" data-genre="communique"',
         edition,
@@ -765,7 +751,7 @@ def parcours_vitrine(admin, direction, hote, numero):
         {
             "titre": "Avis modifié par la cellule",
             "publie_le": "2026-11-12",
-            "texte": "Communiqué réécrit par la cellule de communication. Texte fictif.",
+            "texte": "Communiqué réécrit par la cellule de communication.",
             "jeton": jeton(edition),
         },
     )
@@ -799,13 +785,52 @@ def parcours_ordures(admin, hote, numero):
     verifie(statut in (302, 303), "abonnement fermé sans session")
     _, _, page, _ = admin.appel("GET", "/ordures")
     verifie("<h1>Collecte des ordures</h1>" in page, "module ordures pour l’ANASP et la hiérarchie")
-    verifie("ne sont pas ceux du ministère" in page, "bannière exemple ordures")
+    verifie("Aucun abonnement enregistré" in page, "collecte vide")
+    verifie("Région exemple" not in page and "PME Alpha" not in page, "pas de jeu ordures")
     verifie("S’abonner" in page, "abonnement en ligne")
     _, _, formulaire, _ = admin.appel("GET", "/ordures/abonnement")
-    option = re.search(r'<option value="(\d+)">([^<]*Secteur A)</option>', formulaire)
+    verifie("Enregistrer la localité" in formulaire, "saisie des localités")
+
+    def localite(genre, nom, parent=""):
+        nonlocal formulaire
+        _, _, formulaire, _ = admin.appel(
+            "POST",
+            "/ordures/localite",
+            {"genre": genre, "nom": nom, "parent_id": parent, "jeton": jeton(formulaire)},
+        )
+
+    def choisi(nom):
+        trouve = re.search(rf'<option value="(\d+)">[^<]*{re.escape(nom)}</option>', formulaire)
+        verifie(trouve is not None, nom)
+        return trouve.group(1)
+
+    localite("region", "Conakry")
+    localite("prefecture", "Conakry", choisi("Conakry"))
+    localite("sous_prefecture", "Kaloum", choisi("Préfecture — Conakry"))
+    localite("quartier", "Almamya", choisi("Kaloum"))
+    localite("secteur", "Secteur centre", choisi("Almamya"))
+    select = re.search(r'id="secteur".*?</select>', formulaire, re.S).group(0)
+    option = re.search(r'<option value="(\d+)">([^<]*Secteur centre)</option>', select)
     verifie(option is not None, "chaîne de rattachement")
-    verifie("Région exemple" in option.group(2) and "Préfecture exemple" in option.group(2), "région et préfecture")
-    verifie("Commune exemple" in option.group(2) and "Quartier Nord" in option.group(2), "commune et quartier")
+    verifie("Conakry" in option.group(2) and "Kaloum" in option.group(2), "région et commune")
+    _, _, pme, _ = admin.appel("GET", "/ordures/pme")
+    verifie("Aucune PME enregistrée" in pme, "aucune PME au départ")
+    _, _, pme, _ = admin.appel(
+        "POST",
+        "/ordures/pme/enregistrer",
+        {
+            "nom": "PME de Kaloum",
+            "gestion": "commune",
+            "contact": "620 00 00 01",
+            "jour_collecte": "mardi",
+            "heure_collecte": "7 h 00",
+            "frais_hors_jour": "15000",
+            "secteur_id": option.group(1),
+            "jeton": jeton(pme),
+        },
+    )
+    verifie('data-pme="PME de Kaloum"' in pme and 'data-gestion="commune"' in pme, "PME de commune")
+    _, _, formulaire, _ = admin.appel("GET", "/ordures/abonnement")
     _, chemin, fiche, _ = admin.appel(
         "POST",
         "/ordures/abonnement",
@@ -837,19 +862,11 @@ def parcours_ordures(admin, hote, numero):
     )
     verifie("poubelle pleine" in fiche.lower() or "Poubelle pleine" in fiche or "data-hors-jour" in fiche, "signalement")
     verifie('data-hors-jour="' in fiche, "hors jour indiqué")
-    _, _, exemple, _ = admin.appel("GET", "/ordures/a/ORD-EX-01")
-    verifie('data-genre="exemple"' in exemple and "Aïssatou Bah" in exemple, "exemple et agent")
     statut, _, _, _ = public.appel("GET", "/ordures/pme", suivre=False)
     verifie(statut in (302, 303), "le suivi PME demande un compte")
-
-    _, _, pme, _ = admin.appel("GET", "/ordures/pme")
-    verifie('data-pme="PME Alpha"' in pme and 'data-gestion="commune"' in pme, "PME de commune")
-    verifie('data-pme="PME Bêta"' in pme and 'data-gestion="gouvernorat"' in pme, "PME du gouvernorat")
-    verifie("Secteur A" in pme and "Secteur B" in pme, "plusieurs secteurs pour une PME")
-    verifie("Effectif du jour" in pme and "Secteur A, puis Secteur B" in pme, "effectif et trajet")
     _, _, points, _ = admin.appel("GET", "/ordures/points")
-    verifie("Point ANASP Nord" in points and 'data-exemple="1"' in points, "point ANASP avec pastille")
-    verifie("9.641200" in points, "GPS du point")
+    verifie("Aucun point de collecte enregistré" in points, "aucun point au départ")
+    verifie("Point ANASP Nord" not in points, "pas de point d’exemple")
     _, _, fiche, _ = admin.appel("GET", f"/ordures/a/{reference}")
     _, _, fiche, _ = admin.appel(
         "POST",
@@ -873,19 +890,28 @@ def parcours_eau(admin, hote, numero):
     verifie(statut in (302, 303), "demande d’eau fermée sans session")
     _, _, page, _ = admin.appel("GET", "/eau")
     verifie("SEG" in page and "SNAPE" in page, "module eau pour la hiérarchie")
-    verifie("ne sont pas ceux du ministère" in page, "bannière exemple eau")
+    verifie("Ville Alpha" not in page and "exemple fictif" not in page, "pas de jeu d’eau")
     _, _, seg, _ = admin.appel("GET", "/eau/seg")
-    verifie('data-abonnes="5"' in seg and 'data-taux-abonnement="33.3"' in seg, "taux d’abonnement SEG")
-    verifie('data-sites="3"' in seg and 'data-villes="2"' in seg, "sites et villes")
-    verifie('data-desserte="53.3"' in seg, "taux de desserte")
-    verifie('data-facturation="80.0"' in seg and 'data-recouvrement="62.5"' in seg, "facturation et recouvrement")
-    verifie('data-produit="1000"' in seg and 'data-distribue="800"' in seg, "volumes")
-    verifie('data-ville="Ville Alpha"' in seg and 'data-ville="Ville Bêta"' in seg, "liste des villes")
+    verifie("Aucune ville enregistrée" in seg, "SEG vide")
+    _, _, seg, _ = admin.appel(
+        "POST",
+        "/eau/lieu",
+        {
+            "reseau": "seg",
+            "nom": "Conakry",
+            "population": "10",
+            "population_couverte": "6",
+            "jeton": jeton(seg),
+        },
+    )
+    verifie('data-abonnes="0"' in seg and 'data-villes="1"' in seg, "ville saisie")
+    verifie('data-desserte="60.0"' in seg, "taux de desserte sur la saisie")
+    verifie('data-ville="Conakry"' in seg, "liste des villes")
     verifie("Nombre d’abonné" in seg and "Taux de desserte urbain" in seg, "libellés SEG de la note")
+    verifie("Ville Alpha" not in seg and 'data-produit="1000"' not in seg, "pas de volume d’exemple")
     _, _, snape, _ = admin.appel("GET", "/eau/snape")
-    verifie('data-villages="2"' in snape and 'data-points="3"' in snape, "villages et points")
-    verifie('data-village="Village Nord"' in snape and 'data-couverte="250"' in snape, "population couverte")
-    verifie('data-forages="2"' in snape and "realisés" in snape, "points realisés, graphie de la note")
+    verifie("Aucun village enregistré" in snape, "SNAPE vide")
+    verifie("Village Nord" not in snape, "pas de village d’exemple")
     statut, _, _, _ = public.appel("GET", "/eau/seg", suivre=False)
     verifie(statut in (302, 303), "le tableau SEG demande un compte")
 
@@ -929,7 +955,7 @@ def parcours_eau(admin, hote, numero):
     statut, _, _, _ = seg_compte.appel("GET", "/ordures")
     verifie(statut == 403, "le SEG ne voit pas la collecte")
     statut, _, page, _ = seg_compte.appel("GET", "/eau/seg")
-    verifie(statut == 200 and "Ville Alpha" in page, "le SEG voit son tableau")
+    verifie(statut == 200 and "Conakry" in page, "le SEG voit son tableau")
     statut, _, _, _ = seg_compte.appel("GET", "/eau/snape")
     verifie(statut == 403, "le SEG ne voit pas le SNAPE")
     snape_compte = compte("snaperural", "snape-eau-2026")
@@ -937,7 +963,7 @@ def parcours_eau(admin, hote, numero):
     verifie("/eau/snape" in _nav(accueil_snape) and "/eau/seg" not in _nav(accueil_snape), "menu du SNAPE")
     verifie("/ordures" not in _nav(accueil_snape), "SNAPE sans ordures")
     statut, _, page, _ = snape_compte.appel("GET", "/eau/snape")
-    verifie(statut == 200 and "Village Nord" in page, "le SNAPE voit son tableau")
+    verifie(statut == 200 and "Aucun village enregistré" in page, "le SNAPE voit son tableau")
     statut, _, _, _ = snape_compte.appel("GET", "/eau/seg")
     verifie(statut == 403, "le SNAPE ne voit pas le SEG")
     autre = compte("anaspvue", "anasp-eau-2026")
@@ -956,7 +982,7 @@ def parcours_eau(admin, hote, numero):
     verifie(statut_seg == 200 and statut_snape == 200, "le BSD voit les deux tableaux")
 
     _, _, formulaire, _ = admin.appel("GET", "/eau/demande")
-    lieu = re.search(r'<option value="(\d+)">Ville Alpha</option>', formulaire)
+    lieu = re.search(r'<option value="(\d+)">Conakry</option>', formulaire)
     verifie(lieu is not None, "ville SEG proposée")
     _, chemin, fiche, _ = admin.appel(
         "POST",
@@ -970,7 +996,7 @@ def parcours_eau(admin, hote, numero):
             "jeton": jeton(formulaire),
         },
     )
-    verifie("/eau/d/EAU-" in chemin and "Ville Alpha" in fiche and "9.652000" in fiche, "demande SEG")
+    verifie("/eau/d/EAU-" in chemin and "Conakry" in fiche and "9.652000" in fiche, "demande SEG")
     reference = chemin.rstrip("/").split("/")[-1].split("?")[0]
     _, chemin, fiche, _ = admin.appel(
         "POST",
@@ -986,7 +1012,7 @@ def parcours_eau(admin, hote, numero):
     )
     verifie('data-paye="1"' in fiche, "paiement de l’eau enregistré")
     _, _, seg, _ = admin.appel("GET", "/eau/seg")
-    verifie('data-abonnes="6"' in seg and 'data-taux-abonnement="40.0"' in seg, "le taux suit le nouvel abonné")
+    verifie('data-abonnes="1"' in seg and 'data-taux-abonnement="10.0"' in seg, "le taux suit le nouvel abonné")
     statut, _, _, _ = snape_compte.appel("GET", f"/eau/a/{reference_abonnement}")
     verifie(statut == 403, "le SNAPE ne voit pas l’abonné du SEG")
 
@@ -1018,14 +1044,25 @@ def vitrine_remplace_lexemple():
     )
     semer_vitrine(conn)
     demo = conn.execute(
-        "SELECT titre, texte, exemple FROM bloc_public WHERE genre = 'communique'"
+        "SELECT id FROM bloc_public WHERE titre = 'Communiqué de démonstration'"
     ).fetchone()
-    verifie(demo["exemple"] == 0, "l’ancien communiqué n’est plus un exemple")
-    verifie("démonstration" not in demo["titre"] and "Texte d’exemple" not in demo["texte"], "le texte d’exemple est remplacé")
+    verifie(demo is None, "le communiqué d’exemple est retiré")
+    verifie(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM bloc_public WHERE genre IN ('actualite', 'communique')"
+        ).fetchone()["n"] == 1,
+        "seule la note de la cellule reste hors présentation",
+    )
     garde = conn.execute(
         "SELECT texte FROM bloc_public WHERE titre = 'Note de la cellule'"
     ).fetchone()
     verifie(garde["texte"] == "Texte conservé par la cellule.", "la cellule conserve son texte")
+    verifie(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM bloc_public WHERE genre = 'presentation'"
+        ).fetchone()["n"] == 2,
+        "la présentation du ministère est en place",
+    )
     css = (RACINE / "mahh" / "statique" / "style.css").read_text(encoding="utf-8")
     verifie(".marque" in css and "text-align: center" in css, "l’en-tête est centré")
 
