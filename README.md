@@ -55,7 +55,7 @@ Le test crée une base temporaire, se connecte, ouvre une direction, crée un do
 - Arbre des domaines et des structures de la note du 10 novembre 2026. Les sigles qu’elle ne développe pas restent des sigles.
 - Dossiers et fichiers, avec créer, consulter, modifier, supprimer par groupe.
 - Écran BSD : registre filtrable. Le code d’un projet ouvre ses notes, ses rapports et le classement des documents physiques. Le BSD saisit les projets.
-- Page d’instructions, et sommation d’une direction en retard depuis cette page.
+- Page d’instructions, du ministre aux directions. Le suivi des retards se lit dans les tableaux.
 - Accès complet pour la hiérarchie et le BSD ; vue limitée au rattachement pour une direction.
 - Collecte des ordures : localités, PME, abonnement, paiement enregistré, GPS, agents, signalement. L’ANASP saisit ces éléments.
 - Eau : demande et abonnement SEG et SNAPE. Chaque service saisit ses villes ou ses villages. La hiérarchie et le BSD voient les deux. Chaque structure ne voit que le sien.

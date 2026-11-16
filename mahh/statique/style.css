@@ -341,7 +341,7 @@ dd { margin: 0; }
   gap: 0.2rem;
 }
 .circuit strong { font-size: 1.25rem; }
-.instruction, .sommation {
+.instruction {
   border-top: 1px solid var(--filet);
   padding: 0.8rem 0;
 }

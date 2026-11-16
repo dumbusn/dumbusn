@@ -28,7 +28,6 @@ def page_instructions(ctx, erreur=None):
         raise Interdit("Les instructions concernent la hiérarchie, le BSD, et les directions.")
     with base() as conn:
         instructions = _instructions_visibles(conn, ctx.utilisateur)
-        sommations = _sommations_visibles(conn, ctx.utilisateur)
         retards = [
             projet
             for projet in _filtrer(conn, ctx.utilisateur, "", "", "")
@@ -37,7 +36,7 @@ def page_instructions(ctx, erreur=None):
         structures = conn.execute(
             "SELECT id, nom FROM noeud WHERE genre = 'structure' ORDER BY nom"
         ).fetchall()
-        corps = _corps(ctx, instructions, sommations, retards, structures)
+        corps = _corps(ctx, instructions, retards, structures)
     return page("Instructions", corps, ctx, actif="instructions", erreur=erreur)
 
 
@@ -68,29 +67,6 @@ def action_instruction(ctx):
     return Redirection("/instructions?message=instruction-creee")
 
 
-def action_sommation(ctx):
-    exiger_connexion(ctx)
-    if not est_hierarchie(ctx.utilisateur):
-        raise Interdit("Sommer une direction est réservé à la hiérarchie et au BSD.")
-    try:
-        texte = bloc(ctx.formulaire.get("texte"), 2, 2000, "Sommation")
-    except ValeurRefusee as exc:
-        return page_instructions(ctx, erreur=exc.message)
-    with base() as conn:
-        structure_id = _structure(conn, ctx.formulaire)
-        if structure_id is None:
-            return page_instructions(ctx, erreur="Indiquez la direction ou le service à sommer.")
-        projet_id = _projet(conn, ctx.formulaire, structure_id)
-        conn.execute(
-            """
-            INSERT INTO sommation (structure_id, projet_id, texte, cree_par, cree_le)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (structure_id, projet_id, texte, ctx.utilisateur["id"], maintenant()),
-        )
-    return Redirection("/instructions?message=sommation-creee")
-
-
 def _peut_ecrire(utilisateur, echelon):
     if echelon not in ECRITURE:
         return False
@@ -112,23 +88,6 @@ def _structure(conn, formulaire):
         (structure_id,),
     ).fetchone()
     return structure_id if ligne else None
-
-
-def _projet(conn, formulaire, structure_id):
-    brut = (formulaire.get("projet_id") or "").strip()
-    if not brut:
-        return None
-    try:
-        projet_id = int(brut)
-    except ValueError:
-        return None
-    ligne = conn.execute(
-        "SELECT id, structure_id FROM projet WHERE id = ?",
-        (projet_id,),
-    ).fetchone()
-    if ligne is None or ligne["structure_id"] != structure_id:
-        return None
-    return projet_id
 
 
 def _instructions_visibles(conn, utilisateur):
@@ -157,30 +116,7 @@ def _instructions_visibles(conn, utilisateur):
     ).fetchall()
 
 
-def _sommations_visibles(conn, utilisateur):
-    if est_hierarchie(utilisateur):
-        clause = ""
-        params = ()
-    elif utilisateur["structure_id"]:
-        clause = "WHERE s.structure_id = ?"
-        params = (utilisateur["structure_id"],)
-    else:
-        return []
-    return conn.execute(
-        f"""
-        SELECT s.*, u.nom AS auteur, n.nom AS structure, p.code AS code
-        FROM sommation s
-        LEFT JOIN utilisateur u ON u.id = s.cree_par
-        JOIN noeud n ON n.id = s.structure_id
-        LEFT JOIN projet p ON p.id = s.projet_id
-        {clause}
-        ORDER BY s.cree_le DESC, s.id DESC
-        """,
-        params,
-    ).fetchall()
-
-
-def _corps(ctx, instructions, sommations, retards, structures):
+def _corps(ctx, instructions, retards, structures):
     etapes = []
     for cle, libelle, phrase in CIRCUIT:
         etapes.append(
@@ -196,8 +132,7 @@ def _corps(ctx, instructions, sommations, retards, structures):
         "</section>"
         + _retards(retards)
         + _liste_instructions(instructions)
-        + _liste_sommations(sommations)
-        + _formulaires(ctx, structures, retards)
+        + _formulaires(ctx, structures)
     )
 
 
@@ -232,25 +167,7 @@ def _liste_instructions(instructions):
     return "<h2>Instructions publiées</h2>" + "".join(items)
 
 
-def _liste_sommations(sommations):
-    if not sommations:
-        return "<h2>Sommations</h2><p>Aucune sommation dans votre vue.</p>"
-    items = []
-    for sommation in sommations:
-        code = ""
-        if sommation["code"]:
-            code = f" · {echapper(sommation['code'])}"
-        items.append(
-            f'<article class="sommation" data-sommation="{echapper(sommation["structure"])}">'
-            f'<p class="meta">{echapper(sommation["structure"])}{code} · '
-            f'{echapper(sommation["auteur"] or "Compte retiré")} · '
-            f'{echapper(fmt_date(sommation["cree_le"][:10]))}</p>'
-            f"<p>{echapper(sommation['texte'])}</p></article>"
-        )
-    return "<h2>Sommations</h2>" + "".join(items)
-
-
-def _formulaires(ctx, structures, retards):
+def _formulaires(ctx, structures):
     blocs = []
     for echelon, libelle in (
         ("ministre", "Instruction du ministre"),
@@ -274,28 +191,6 @@ def _formulaires(ctx, structures, retards):
             + '<label for="texte-' + echelon + '">Texte</label>'
             + f'<textarea id="texte-{echelon}" name="texte" required maxlength="2000"></textarea>'
             + '<button type="submit">Publier</button></form>'
-        )
-    if est_hierarchie(ctx.utilisateur):
-        options_retard = ['<option value="">Sans projet précis</option>']
-        for projet in retards:
-            if not projet["structure_id"]:
-                continue
-            options_retard.append(
-                f'<option value="{int(projet["id"])}">{echapper(projet["code"])}</option>'
-            )
-        blocs.append(
-            "<h2>Sommer d’avancer</h2>"
-            "<p class=\"aide\">Le BSD et la hiérarchie peuvent sommer une direction depuis cette page. "
-            "Ce n’est pas une citation d’un texte juridique.</p>"
-            '<form method="post" action="/instructions/sommation" class="formulaire">'
-            + jeton_cache(ctx)
-            + '<label for="structure-sommation">Direction ou service</label>'
-            + _select("structure-sommation", "structure_id", structures)
-            + '<label for="projet-sommation">Projet en retard rattaché</label>'
-            + f'<select id="projet-sommation" name="projet_id">{"".join(options_retard)}</select>'
-            + '<label for="texte-sommation">Message</label>'
-            + '<textarea id="texte-sommation" name="texte" required maxlength="2000"></textarea>'
-            + '<button type="submit">Sommer d’avancer</button></form>'
         )
     return "".join(blocs)
 

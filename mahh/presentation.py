@@ -28,7 +28,6 @@ AVIS = {
     "projet-rattache": "Le rattachement a été enregistré.",
     "piece-ajoutee": "L’élément a été ajouté au dossier du projet.",
     "instruction-creee": "L’instruction a été publiée.",
-    "sommation-creee": "La direction a été sommée d’avancer.",
     "abonnement-cree": "L’abonnement est enregistré. Le paiement ne l’est pas encore.",
     "paiement-enregistre": "Le paiement a été enregistré.",
     "signalement-enregistre": "Le signalement « poubelle pleine » a été enregistré.",

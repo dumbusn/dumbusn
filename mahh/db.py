@@ -119,15 +119,6 @@ CREATE TABLE IF NOT EXISTS instruction (
     cree_le TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS sommation (
-    id INTEGER PRIMARY KEY,
-    structure_id INTEGER NOT NULL REFERENCES noeud(id),
-    projet_id INTEGER REFERENCES projet(id) ON DELETE SET NULL,
-    texte TEXT NOT NULL,
-    cree_par INTEGER REFERENCES utilisateur(id),
-    cree_le TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS maille (
     id INTEGER PRIMARY KEY,
     parent_id INTEGER REFERENCES maille(id),

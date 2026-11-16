@@ -623,7 +623,7 @@ def parcours(hote, numero):
             "jeton": jeton(saisie),
         },
     )
-    projet_anasp = re.search(r"/bsd/projet/(\d+)", chemin).group(1)
+    verifie(re.search(r"/bsd/projet/\d+", chemin) is not None, "projet rattaché créé")
 
     direction = Client(hote, numero)
     _, _, page, _ = direction.appel("GET", "/connexion")
@@ -659,7 +659,7 @@ def parcours(hote, numero):
     _, _, ecran, _ = admin.appel("GET", "/instructions")
     verifie('data-echelon="ministre"' in ecran and 'data-echelon="chef_cabinet"' in ecran, "circuit")
     verifie('data-echelon="secretaire_general"' in ecran and 'data-echelon="directions"' in ecran, "circuit complet")
-    verifie("Sommer d’avancer" in ecran, "sommation depuis la page")
+    verifie("Sommer" not in ecran and "sommation" not in ecran.lower(), "pas de sommation")
     _, _, ecran, _ = admin.appel(
         "POST",
         "/instructions",
@@ -670,38 +670,10 @@ def parcours(hote, numero):
         },
     )
     verifie("Note du ministre pour le cabinet de test." in ecran, "instruction publiée")
-    _, _, ecran, _ = admin.appel("GET", "/instructions")
-    admin.appel(
-        "POST",
-        "/instructions/sommation",
-        {
-            "structure_id": anasp.group(1),
-            "projet_id": projet_anasp,
-            "texte": "Avancer le dossier de test ANASP.",
-            "jeton": jeton(ecran),
-        },
-    )
-    _, _, ecran, _ = admin.appel("GET", "/instructions")
-    admin.appel(
-        "POST",
-        "/instructions/sommation",
-        {
-            "structure_id": dga,
-            "texte": "Sommation adressée à la DGA seule.",
-            "jeton": jeton(ecran),
-        },
-    )
     _, _, vue_direction, _ = direction.appel("GET", "/instructions")
-    verifie("Avancer le dossier de test ANASP." in vue_direction, "sommation reçue")
-    verifie("Sommation adressée à la DGA seule." not in vue_direction, "sommation des autres cachée")
+    verifie("Sommer" not in vue_direction, "la direction ne voit pas de sommation")
     verifie("Note du ministre pour le cabinet de test." not in vue_direction, "instruction du cabinet cachée")
     verifie('data-retard="TEST-02"' in vue_direction, "retard de la direction")
-    statut, _, _, _ = direction.appel(
-        "POST",
-        "/instructions/sommation",
-        {"structure_id": anasp.group(1), "texte": "Une direction ne somme pas.", "jeton": jeton(vue_direction)},
-    )
-    verifie(statut == 403, "la direction ne somme pas")
     parcours_vitrine(admin, direction, hote, numero)
 
 

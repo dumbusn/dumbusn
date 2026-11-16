@@ -61,7 +61,7 @@ from mahh.administration import (
 )
 from mahh.config import hote, port
 from mahh.db import preparer
-from mahh.instructions import action_instruction, action_sommation, page_instructions
+from mahh.instructions import action_instruction, page_instructions
 from mahh.documents import (
     action_dossier,
     action_fichier,
@@ -166,7 +166,6 @@ ROUTES = (
     ("GET", re.compile(r"^/piece/(\d+)$"), telecharger_piece),
     ("GET", re.compile(r"^/instructions$"), page_instructions),
     ("POST", re.compile(r"^/instructions$"), action_instruction),
-    ("POST", re.compile(r"^/instructions/sommation$"), action_sommation),
     ("GET", re.compile(r"^/bsd/projet/(\d+)/modifier$"), page_modifier),
     ("POST", re.compile(r"^/bsd/projet/(\d+)/modifier$"), action_modifier),
     ("POST", re.compile(r"^/bsd/projet/(\d+)/supprimer$"), action_supprimer_projet),
