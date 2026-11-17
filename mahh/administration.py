@@ -325,6 +325,9 @@ def page_utilisateurs(ctx, erreur=None):
         + '<input id="identifiant" name="identifiant" maxlength="40" required autocomplete="off">'
         + '<label for="mot">Mot de passe initial</label>'
         + '<input id="mot" name="mot_de_passe" type="password" required autocomplete="new-password">'
+        + '<label for="courriel">Adresse électronique</label>'
+        + '<input id="courriel" name="courriel" type="email" maxlength="120" autocomplete="off">'
+        + '<p class="aide">Elle sert à envoyer l’instruction. Sans elle, l’instruction est quand même enregistrée.</p>'
         + '<label for="niveau">Niveau</label>'
         + '<select id="niveau" name="fonction" data-niveaux="1">'
         + '<option value="">Choisir le niveau</option>'
@@ -370,13 +373,16 @@ def action_utilisateur(ctx):
             return page_utilisateurs(ctx, erreur="La direction n’est pas dans l’arbre.")
         if fonction in NIVEAUX_DIRECTION and not structure_id:
             return page_utilisateurs(ctx, erreur="Choisissez la direction rattachée.")
+        courriel = (ctx.formulaire.get("courriel") or "").strip()
+        if courriel and ("@" not in courriel or len(courriel) > 120):
+            return page_utilisateurs(ctx, erreur="L’adresse électronique n’est pas recevable.")
         conn.execute(
             """
             INSERT INTO utilisateur (
-                identifiant, nom, mot_de_passe, administrateur, fonction, structure_id, actif, cree_le
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                identifiant, nom, mot_de_passe, administrateur, fonction, structure_id, courriel, actif, cree_le
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
             """,
-            (ident, nom, hasher(mot), admin, fonction, structure_id, maintenant()),
+            (ident, nom, hasher(mot), admin, fonction, structure_id, courriel, maintenant()),
         )
     return Redirection("/utilisateurs?message=utilisateur-cree")
 

@@ -663,30 +663,68 @@ def parcours(hote, numero):
     statut, _, _, _ = direction.appel("GET", lien.group(1))
     verifie(statut == 403, "projet d'exemple refusé à la direction")
 
+    _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
+    admin.appel(
+        "POST",
+        "/utilisateurs",
+        {
+            "identifiant": "sg-test",
+            "nom": "Le secrétaire général",
+            "mot_de_passe": "sg-socle-2026",
+            "fonction": "secretaire_general",
+            "courriel": "sg@ministere.test",
+            "jeton": jeton(page_users),
+        },
+    )
     _, _, ecran, _ = admin.appel("GET", "/instructions")
     verifie('data-echelon="ministre"' in ecran and 'data-echelon="chef_cabinet"' in ecran, "circuit")
-    verifie('data-echelon="secretaire_general"' in ecran and 'data-echelon="directions"' in ecran, "circuit complet")
+    verifie('data-echelon="secretaire_general"' in ecran and 'data-echelon="charge_etudes"' in ecran, "circuit complet")
+    verifie("data-niveau=" not in ecran, "l’administrateur sans niveau n’instruit pas")
     verifie("Sommer" not in ecran and "sommation" not in ecran.lower(), "pas de sommation")
-    _, _, ecran, _ = admin.appel(
+    _, _, ecran, _ = ministre.appel("GET", "/instructions")
+    verifie('data-niveau="secretaire_general"' in ecran, "le ministre instruit le secrétaire général")
+    verifie('data-niveau="directeur"' not in ecran, "le ministre n’instruit pas plus bas")
+    destinataire = re.search(r'name="destinataire" value="(\d+)"', ecran)
+    verifie(destinataire is not None, "le secrétaire général est proposé")
+    _, _, ecran, _ = ministre.appel(
         "POST",
         "/instructions",
         {
-            "echelon": "ministre",
-            "texte": "Note du ministre pour le cabinet de test.",
+            "destinataire": destinataire.group(1),
+            "texte": "Note du ministre pour le secrétaire général.",
             "jeton": jeton(ecran),
         },
     )
-    verifie("Note du ministre pour le cabinet de test." in ecran, "instruction publiée")
-    verifie("Marquer exécutée" in ecran and "En cours" in ecran, "suivi d’exécution")
+    verifie("Note du ministre pour le secrétaire général." in ecran, "instruction publiée")
+    verifie("n’est pas configuré" in ecran, "l’instruction reste enregistrée sans SMTP")
+    verifie("En cours" in ecran, "le ministre attend le retour")
     verifie("Sommer" not in ecran and "sommation" not in ecran.lower(), "pas de sommation après publication")
-    execution = re.search(r'action="/instructions/(\d+)/executer"', ecran)
-    verifie(execution is not None, "formulaire d’exécution")
-    _, _, ecran, _ = admin.appel(
+    verifie("Marquer exécutée" not in ecran, "l’auteur n’exécute pas à la place du destinataire")
+    secretaire = Client(hote, numero)
+    _, _, formulaire, _ = secretaire.appel("GET", "/connexion")
+    _, _, ecran_sg, _ = secretaire.appel(
+        "POST",
+        "/connexion",
+        {"identifiant": "sg-test", "mot_de_passe": "sg-socle-2026", "jeton": jeton(formulaire)},
+    )
+    _, _, ecran_sg, _ = secretaire.appel("GET", "/instructions")
+    verifie("Note du ministre pour le secrétaire général." in ecran_sg, "le destinataire voit l’instruction")
+    execution = re.search(r'action="/instructions/(\d+)/executer"', ecran_sg)
+    verifie(execution is not None, "formulaire de retour")
+    anonyme = Client(hote, numero)
+    statut, _, connexion, _ = anonyme.appel("GET", f"/instructions/{execution.group(1)}")
+    verifie(statut == 200 and "<h1>Connexion</h1>" in connexion, "le lien demande l’identification")
+    verifie(f"/instructions/{execution.group(1)}" in connexion, "le lien revient sur l’instruction")
+    _, _, ecran_sg, _ = secretaire.appel(
         "POST",
         f"/instructions/{execution.group(1)}/executer",
-        {"compte_rendu": "Note transmise au cabinet.", "jeton": jeton(ecran)},
+        {"compte_rendu": "Note transmise aux directions.", "jeton": jeton(ecran_sg)},
     )
-    verifie("Exécutée le" in ecran and "Note transmise au cabinet." in ecran, "instruction exécutée")
+    verifie("Exécutée" in ecran_sg and "Note transmise aux directions." in ecran_sg, "retour du destinataire")
+    _, _, ecran_directeur, _ = directeur.appel("GET", "/instructions")
+    verifie('data-niveau="directeur_adjoint"' in ecran_directeur, "le directeur instruit son adjoint")
+    verifie('data-niveau="chef_section"' not in ecran_directeur, "pas plus bas que le niveau suivant")
+    verifie("votre direction" in ecran_directeur, "le directeur reste dans sa direction")
     _, _, journal, _ = admin.appel("GET", "/journal")
     verifie("Instruction publiée" in journal and "Instruction marquée exécutée" in journal, "journal des actions")
     verifie("Sommation" not in journal, "le journal ne parle pas de sommation")
@@ -791,30 +829,40 @@ def parcours_ordures(admin, hote, numero):
     verifie("Région exemple" not in page and "PME Alpha" not in page, "pas de jeu ordures")
     verifie("S’abonner" in page, "abonnement en ligne")
     _, _, formulaire, _ = admin.appel("GET", "/ordures/abonnement")
-    verifie("Enregistrer la localité" in formulaire, "saisie des localités")
+    verifie("Enregistrer la localité" not in formulaire, "le découpage ne se ressaisit pas")
+    verifie("Beyla" in formulaire and "Conakry" in formulaire, "les dix régions sont chargées")
 
-    def localite(genre, nom, parent=""):
-        nonlocal formulaire
-        _, _, formulaire, _ = admin.appel(
-            "POST",
-            "/ordures/localite",
-            {"genre": genre, "nom": nom, "parent_id": parent, "jeton": jeton(formulaire)},
-        )
-
-    def choisi(nom):
-        trouve = re.search(rf'<option value="(\d+)">[^<]*{re.escape(nom)}</option>', formulaire)
+    def choisi(html, select_id, nom):
+        bloc = re.search(rf'id="{select_id}".*?</select>', html, re.S)
+        verifie(bloc is not None, select_id)
+        trouve = re.search(rf'<option value="(\d+)">{re.escape(nom)}</option>', bloc.group(0))
         verifie(trouve is not None, nom)
         return trouve.group(1)
 
-    localite("region", "Conakry")
-    localite("prefecture", "Conakry", choisi("Conakry"))
-    localite("sous_prefecture", "Kaloum", choisi("Préfecture — Conakry"))
-    localite("quartier", "Almamya", choisi("Kaloum"))
-    localite("secteur", "Secteur centre", choisi("Almamya"))
-    select = re.search(r'id="secteur".*?</select>', formulaire, re.S).group(0)
-    option = re.search(r'<option value="(\d+)">([^<]*Secteur centre)</option>', select)
-    verifie(option is not None, "chaîne de rattachement")
-    verifie("Conakry" in option.group(2) and "Kaloum" in option.group(2), "région et commune")
+    region = choisi(formulaire, "dec-region", "Conakry")
+    _, _, formulaire, _ = admin.appel("GET", f"/ordures/abonnement?region={region}")
+    prefecture = choisi(formulaire, "dec-prefecture", "Conakry")
+    _, _, formulaire, _ = admin.appel(
+        "GET", f"/ordures/abonnement?region={region}&prefecture={prefecture}"
+    )
+    commune = choisi(formulaire, "dec-sous_prefecture", "Kaloum (Commune)")
+    _, _, formulaire, _ = admin.appel(
+        "GET",
+        f"/ordures/abonnement?region={region}&prefecture={prefecture}&sous_prefecture={commune}",
+    )
+    quartier = choisi(formulaire, "dec-quartier", "Almamya 1")
+    _, _, formulaire, _ = admin.appel(
+        "GET",
+        "/ordures/abonnement?region="
+        + f"{region}&prefecture={prefecture}&sous_prefecture={commune}&quartier={quartier}",
+    )
+    secteur = choisi(formulaire, "dec-secteur", "Babady Hadiri")
+    _, _, formulaire, _ = admin.appel(
+        "GET",
+        "/ordures/abonnement?region="
+        + f"{region}&prefecture={prefecture}&sous_prefecture={commune}&quartier={quartier}&secteur={secteur}",
+    )
+    verifie(f'name="secteur_id" value="{secteur}"' in formulaire, "secteur du découpage officiel")
     _, _, pme, _ = admin.appel("GET", "/ordures/pme")
     verifie("Aucune PME enregistrée" in pme, "aucune PME au départ")
     _, _, pme, _ = admin.appel(
@@ -827,7 +875,7 @@ def parcours_ordures(admin, hote, numero):
             "jour_collecte": "mardi",
             "heure_collecte": "7 h 00",
             "frais_hors_jour": "15000",
-            "secteur_id": option.group(1),
+            "secteur_id": secteur,
             "jeton": jeton(pme),
         },
     )
@@ -839,7 +887,7 @@ def parcours_ordures(admin, hote, numero):
         {
             "nom": "Fatou Diallo",
             "telephone": "622 00 00 13",
-            "secteur_id": option.group(1),
+            "secteur_id": secteur,
             "latitude": "9,641500",
             "longitude": "-13.578500",
             "jeton": jeton(formulaire),
@@ -848,6 +896,28 @@ def parcours_ordures(admin, hote, numero):
     verifie("/ordures/a/ORD-" in chemin, "référence d’abonnement")
     verifie("9.641500" in fiche and "-13.578500" in fiche, "GPS enregistré")
     verifie("Sous-préfecture ou commune" in fiche and "Secteur ou village" in fiche, "maillage affiché")
+    verifie("Conakry" in fiche and "Kaloum" in fiche and "Babady Hadiri" in fiche, "chaîne officielle")
+    _, _, directions, _ = admin.appel("GET", "/directions")
+    anasp_id = re.search(r'href="/noeud/(\d+)" data-nom="ANASP"', directions).group(1)
+    _, _, indicateurs, _ = admin.appel("GET", f"/noeud/{anasp_id}?region={region}")
+    verifie('data-indicateur="ztt" data-nombre="0"' in indicateurs, "aucune ZTT tant qu’elle n’est pas créée")
+    verifie('data-indicateur="pme"' in indicateurs and "PME de Kaloum" in indicateurs, "la PME créée est comptée")
+    verifie('data-indicateur="abonnes" data-nombre="1"' in indicateurs, "l’abonné créé est compté")
+    _, _, indicateurs, _ = admin.appel(
+        "POST",
+        "/ordures/ztt",
+        {
+            "nom": "ZTT de Kaloum",
+            "maille_id": secteur,
+            "retour": f"/noeud/{anasp_id}?region={region}",
+            "jeton": jeton(indicateurs),
+        },
+    )
+    verifie("ZTT de Kaloum" in indicateurs and 'data-indicateur="ztt" data-nombre="1"' in indicateurs, "la ZTT créée est comptée")
+    autre = re.search(r'<option value="(\d+)">Boké</option>', indicateurs)
+    verifie(autre is not None, "les autres régions restent proposées")
+    _, _, ailleurs, _ = admin.appel("GET", f"/noeud/{anasp_id}?region={autre.group(1)}")
+    verifie('data-indicateur="abonnes" data-nombre="0"' in ailleurs, "une autre région ne reprend pas les comptes")
     verifie("mardi" in fiche and "620 00 00 01" in fiche, "jours et contact communiqués")
     verifie('data-paye="0"' in fiche, "paiement encore ouvert")
     reference = chemin.rstrip("/").split("/")[-1].split("?")[0]

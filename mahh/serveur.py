@@ -63,11 +63,13 @@ from mahh.administration import (
 )
 from mahh.config import hote, port
 from mahh.db import preparer
+from mahh.indicateurs import action_ztt
 from mahh.instructions import (
     action_executer,
     action_instruction,
     action_rouvrir,
     page_instructions,
+    page_une_instruction,
 )
 from mahh.journal import page_journal
 from mahh.site_public import page_publique
@@ -124,6 +126,7 @@ class Demande:
         self.chemin = "/"
         self.requete = {}
         self.formulaire = {}
+        self.listes = {}
         self.fichier = None
         self.utilisateur = None
         self.jeton = ""
@@ -174,6 +177,7 @@ ROUTES = (
     ("POST", re.compile(r"^/bsd/projet/(\d+)/rattacher$"), action_rattacher),
     ("GET", re.compile(r"^/piece/(\d+)$"), telecharger_piece),
     ("GET", re.compile(r"^/instructions$"), page_instructions),
+    ("GET", re.compile(r"^/instructions/(\d+)$"), page_une_instruction),
     ("POST", re.compile(r"^/instructions$"), action_instruction),
     ("POST", re.compile(r"^/instructions/(\d+)/executer$"), action_executer),
     ("POST", re.compile(r"^/instructions/(\d+)/rouvrir$"), action_rouvrir),
@@ -188,6 +192,7 @@ ROUTES = (
     ("GET", re.compile(r"^/ordures/abonnement$"), page_abonnement),
     ("POST", re.compile(r"^/ordures/abonnement$"), action_abonnement),
     ("POST", re.compile(r"^/ordures/localite$"), action_localite),
+    ("POST", re.compile(r"^/ordures/ztt$"), action_ztt),
     ("POST", re.compile(r"^/ordures/chercher$"), action_chercher),
     ("GET", re.compile(r"^/ordures/pme$"), page_pme),
     ("POST", re.compile(r"^/ordures/pme$"), action_suivi),
@@ -271,7 +276,7 @@ class Gestionnaire(BaseHTTPRequestHandler):
 
         if self.command == "POST":
             try:
-                ctx.formulaire, ctx.fichier = _lire_corps(self)
+                ctx.formulaire, ctx.fichier, ctx.listes = _lire_corps(self)
             except ValueError:
                 self._envoyer(
                     page_message(ctx, "Demande refusée", "Le formulaire n’a pas pu être lu.", 400),
@@ -410,11 +415,15 @@ def _lire_corps(handler):
     type_contenu = handler.headers.get("Content-Type", "")
     if type_contenu.startswith("application/x-www-form-urlencoded"):
         couples = parse_qs(corps.decode("utf-8", errors="replace"), keep_blank_values=True)
-        return {cle: valeurs[0] for cle, valeurs in couples.items()}, None
+        return (
+            {cle: valeurs[0] for cle, valeurs in couples.items()},
+            None,
+            {cle: valeurs for cle, valeurs in couples.items()},
+        )
     if type_contenu.startswith("multipart/form-data"):
         return _multipart(type_contenu, corps)
     if longueur == 0:
-        return {}, None
+        return {}, None, {}
     raise ValueError("type")
 
 
@@ -448,7 +457,7 @@ def _multipart(type_contenu, corps):
             fichier = (nom_fichier, contenu)
         else:
             champs[nom] = contenu.decode("utf-8", errors="replace")
-    return champs, fichier
+    return champs, fichier, {cle: [valeur] for cle, valeur in champs.items()}
 
 
 def _frontiere(type_contenu):

@@ -6,7 +6,9 @@ Les quatre blocs sont en service : la gestion documentaire des directions, le ta
 
 Le registre des projets, les actualités, les communiqués et les tableaux de la collecte, du SEG et du SNAPE restent vides tant que les services n’ont pas saisi leurs données.
 
-La page publique, ouverte sans connexion, reprend le menu d’un site de ministère. La cellule de communication rédige la présentation, les actualités et les communiqués. L’organigramme affiché est celui que l’administrateur construit. Après connexion : carte des points GPS déjà saisis, export CSV du registre visible, journal des actions pour l’administrateur, et suivi d’exécution des instructions (échéance, compte rendu). Aucun chiffre n’est affiché s’il n’a pas été saisi.
+La page publique, ouverte sans connexion, reprend le menu d’un site de ministère. La cellule de communication rédige la présentation, les actualités et les communiqués. L’organigramme affiché est celui que l’administrateur construit : ministre, secrétaire général, chef de cabinet, directeurs, chefs de division, chefs de section, chargés d’études. Après connexion : carte des points GPS déjà saisis, export CSV du registre visible, journal des actions pour l’administrateur. Aucun chiffre n’est affiché s’il n’a pas été saisi.
+
+Chaque niveau d’instruction n’écrit qu’au niveau juste en dessous et choisit ses destinataires. Le chargé d’études reçoit, il n’instruit pas. L’instruction part par e-mail si `MAHH_SMTP_HOTE`, `MAHH_SMTP_PORT`, `MAHH_SMTP_UTILISATEUR`, `MAHH_SMTP_MOT_DE_PASSE` et `MAHH_SMTP_EXPEDITEUR` sont définis. Le lien utilise `MAHH_URL_PUBLIQUE` (défaut `https://mhhc.nasad.gn`). Sans ces réglages, l’instruction est quand même enregistrée. Les indicateurs d’assainissement comptent les zones de traitement et de tri, les PME et les abonnés réellement créés, selon le découpage officiel des dix régions.
 
 ## Lancer
 

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS utilisateur (
     fonction TEXT NOT NULL DEFAULT '',
     structure_id INTEGER,
     actif INTEGER NOT NULL DEFAULT 1,
+    courriel TEXT NOT NULL DEFAULT '',
     cree_le TEXT NOT NULL
 );
 
@@ -112,11 +113,25 @@ CREATE TABLE IF NOT EXISTS piece (
 
 CREATE TABLE IF NOT EXISTS instruction (
     id INTEGER PRIMARY KEY,
-    echelon TEXT NOT NULL CHECK (echelon IN ('ministre', 'chef_cabinet', 'secretaire_general')),
+    echelon TEXT NOT NULL,
     structure_id INTEGER REFERENCES noeud(id),
     texte TEXT NOT NULL,
     cree_par INTEGER REFERENCES utilisateur(id),
-    cree_le TEXT NOT NULL
+    cree_le TEXT NOT NULL,
+    echeance TEXT NOT NULL DEFAULT '',
+    etat TEXT NOT NULL DEFAULT 'en_cours',
+    execute_le TEXT,
+    execute_par INTEGER,
+    compte_rendu TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS instruction_destinataire (
+    instruction_id INTEGER NOT NULL REFERENCES instruction(id) ON DELETE CASCADE,
+    utilisateur_id INTEGER NOT NULL REFERENCES utilisateur(id),
+    etat TEXT NOT NULL DEFAULT 'en_cours',
+    execute_le TEXT,
+    compte_rendu TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (instruction_id, utilisateur_id)
 );
 
 CREATE TABLE IF NOT EXISTS maille (
@@ -124,7 +139,17 @@ CREATE TABLE IF NOT EXISTS maille (
     parent_id INTEGER REFERENCES maille(id),
     genre TEXT NOT NULL CHECK (genre IN ('region', 'prefecture', 'sous_prefecture', 'quartier', 'secteur')),
     nom TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
     exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS ztt (
+    id INTEGER PRIMARY KEY,
+    nom TEXT NOT NULL,
+    maille_id INTEGER NOT NULL REFERENCES maille(id),
+    cree_par INTEGER REFERENCES utilisateur(id),
+    cree_le TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pme (
@@ -461,6 +486,49 @@ def migrer(conn):
     def colonnes(table):
         return {ligne[1] for ligne in conn.execute(f"PRAGMA table_info({table})")}
 
+    definition = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'instruction'"
+    ).fetchone()
+    if definition and definition["sql"] and "CHECK" in definition["sql"]:
+        conn.execute("ALTER TABLE instruction RENAME TO instruction_ancienne")
+        conn.execute(
+            """
+            CREATE TABLE instruction (
+                id INTEGER PRIMARY KEY,
+                echelon TEXT NOT NULL,
+                structure_id INTEGER REFERENCES noeud(id),
+                texte TEXT NOT NULL,
+                cree_par INTEGER REFERENCES utilisateur(id),
+                cree_le TEXT NOT NULL,
+                echeance TEXT NOT NULL DEFAULT '',
+                etat TEXT NOT NULL DEFAULT 'en_cours',
+                execute_le TEXT,
+                execute_par INTEGER,
+                compte_rendu TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        anciennes = colonnes("instruction_ancienne")
+        gardees = [
+            nom
+            for nom in (
+                "id", "echelon", "structure_id", "texte", "cree_par", "cree_le",
+                "echeance", "etat", "execute_le", "execute_par", "compte_rendu",
+            )
+            if nom in anciennes
+        ]
+        liste = ", ".join(gardees)
+        conn.execute(
+            f"INSERT INTO instruction ({liste}) SELECT {liste} FROM instruction_ancienne"
+        )
+        conn.execute("DROP TABLE instruction_ancienne")
+
+    if "courriel" not in colonnes("utilisateur"):
+        conn.execute("ALTER TABLE utilisateur ADD COLUMN courriel TEXT NOT NULL DEFAULT ''")
+    if "code" not in colonnes("maille"):
+        conn.execute("ALTER TABLE maille ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+    if "detail" not in colonnes("maille"):
+        conn.execute("ALTER TABLE maille ADD COLUMN detail TEXT NOT NULL DEFAULT ''")
     if "fonction" not in colonnes("utilisateur"):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN fonction TEXT NOT NULL DEFAULT ''")
     if "structure_id" not in colonnes("utilisateur"):
@@ -491,6 +559,7 @@ def migrer(conn):
             intitule TEXT NOT NULL DEFAULT '',
             ordre INTEGER NOT NULL DEFAULT 0,
             noeud_id INTEGER REFERENCES noeud(id) ON DELETE SET NULL,
+            niveau TEXT NOT NULL DEFAULT '',
             cree_le TEXT NOT NULL,
             modifie_le TEXT NOT NULL
         )
@@ -528,6 +597,10 @@ def migrer(conn):
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_journal_quand ON journal(quand)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_maille_parent ON maille(parent_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_maille_code ON maille(code)")
+    if "niveau" not in colonnes("organigramme"):
+        conn.execute("ALTER TABLE organigramme ADD COLUMN niveau TEXT NOT NULL DEFAULT ''")
 
 
 def semer_organigramme(conn):
@@ -583,6 +656,9 @@ def preparer():
         retirer_jeu(conn)
         semer_vitrine(conn)
         semer_organigramme(conn)
+        from mahh.decoupage import semer_decoupage
+
+        semer_decoupage(conn)
         conn.commit()
         return info
     except Exception:

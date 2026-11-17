@@ -155,7 +155,7 @@ def action_connexion(ctx):
         jeton = ouvrir_session(conn, personne["id"])
     ctx.cookies.append(cookie_session(jeton))
     ctx.cookies.append(cookie_jeton(nouveau_jeton()))
-    return Redirection("/")
+    return Redirection(url_sure(ctx.formulaire.get("suivant") or "/"))
 
 
 def action_deconnexion(ctx):

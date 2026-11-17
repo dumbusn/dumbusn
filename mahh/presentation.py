@@ -28,6 +28,17 @@ AVIS = {
     "projet-rattache": "Le rattachement a été enregistré.",
     "piece-ajoutee": "L’élément a été ajouté au dossier du projet.",
     "instruction-creee": "L’instruction a été publiée.",
+    "instruction-envoyee": "L’instruction est enregistrée et le message est parti.",
+    "instruction-sans-courriel": (
+        "L’instruction est enregistrée. L’envoi par e-mail n’est pas configuré."
+    ),
+    "instruction-sans-adresse": (
+        "L’instruction est enregistrée. Le destinataire n’a pas d’adresse électronique."
+    ),
+    "instruction-courriel-echec": (
+        "L’instruction est enregistrée. L’envoi par e-mail n’a pas abouti."
+    ),
+    "ztt-creee": "La zone de traitement et de tri a été enregistrée.",
     "instruction-executee": "L’instruction a été marquée exécutée.",
     "instruction-rouverte": "L’instruction a été rouverte.",
     "abonnement-cree": "L’abonnement est enregistré. Le paiement ne l’est pas encore.",

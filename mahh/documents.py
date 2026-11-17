@@ -214,10 +214,25 @@ def _corps_noeud(ctx, conn, noeud, droits, fil, enfants, libelles):
         fonctions = rendu_organigramme(
             ctx, conn, noeud_id=noeud["id"], edition=False
         ) + rendu_attributions(ctx, conn, noeud_id=noeud["id"])
-    restants = [
-        ligne for ligne in libelles if ligne["texte"] not in ("Organigramme", "Attribution")
-    ]
-    catalogue = fonctions
+    from mahh.indicateurs import LIBELLES, rendu as rendu_indicateurs
+
+    if noeud["nom"] == "ANASP":
+        restants = [
+            ligne for ligne in libelles
+            if ligne["texte"] not in ("Organigramme", "Attribution") and ligne["texte"] not in LIBELLES
+        ]
+        indicateurs = rendu_indicateurs(ctx, conn, f"/noeud/{int(noeud['id'])}")
+    elif noeud["nom"] == "DGA":
+        restants = [
+            ligne for ligne in libelles if ligne["texte"] not in ("Organigramme", "Attribution")
+        ]
+        indicateurs = rendu_indicateurs(ctx, conn, f"/noeud/{int(noeud['id'])}")
+    else:
+        restants = [
+            ligne for ligne in libelles if ligne["texte"] not in ("Organigramme", "Attribution")
+        ]
+        indicateurs = ""
+    catalogue = fonctions + indicateurs
     if restants:
         cartes = "".join(
             f'<article class="carte"><h3>{echapper(ligne["texte"])}</h3></article>'

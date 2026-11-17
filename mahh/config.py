@@ -26,3 +26,8 @@ def hote():
 
 def port():
     return int(os.environ.get("MAHH_PORT", "8000"))
+
+
+def url_publique():
+    brut = os.environ.get("MAHH_URL_PUBLIQUE", "").strip()
+    return (brut or "https://mhhc.nasad.gn").rstrip("/")

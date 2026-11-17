@@ -21,12 +21,6 @@ GENRES = {
 }
 GESTIONS = {"commune": "Commune", "gouvernorat": "Gouvernorat"}
 MONTANT_ABONNEMENT = "50000"
-PARENT_GENRE = {
-    "prefecture": "region",
-    "sous_prefecture": "prefecture",
-    "quartier": "sous_prefecture",
-    "secteur": "quartier",
-}
 
 
 def _garder(ctx):
@@ -77,15 +71,21 @@ def page_abonnement(ctx, erreur=None, valeurs=None):
     _garder(ctx)
     valeurs = valeurs or {}
     with base() as conn:
-        options = _options_secteurs(conn, valeurs.get("secteur_id"))
-        localites = _forme_localite(ctx, conn)
+        cascade, secteur_id = _cascade(ctx, conn, "/ordures/abonnement")
+    if not secteur_id and valeurs.get("secteur_id"):
+        secteur_id = valeurs.get("secteur_id")
+    rattachement = ""
+    if secteur_id:
+        rattachement = f'<input type="hidden" id="secteur" name="secteur_id" value="{echapper(str(secteur_id))}">'
+    else:
+        rattachement = "<p>Choisissez le secteur ou le village du découpage, puis enregistrez l’abonnement.</p>"
     corps = (
         _fil()
         + "<h1>Abonnement</h1>"
-        + localites
-        + "<p>L’abonné indique son rattachement, du plus large au plus fin, et le relevé GPS "
-        "de l’inscription : latitude et longitude. Le montant est enregistré dans l’application. "
-        "Ce n’est pas un paiement bancaire.</p>"
+        + "<p>Le rattachement vient du découpage officiel des dix régions. "
+        "Il ne se ressaisit pas. L’abonné indique aussi le relevé GPS : latitude et longitude. "
+        "Le montant est enregistré dans l’application. Ce n’est pas un paiement bancaire.</p>"
+        + cascade
         + f"<p>Montant de l’abonnement : {echapper(_fmt_gnf(MONTANT_ABONNEMENT))}.</p>"
         + '<form method="post" action="/ordures/abonnement" class="formulaire">'
         + jeton_cache(ctx)
@@ -93,10 +93,7 @@ def page_abonnement(ctx, erreur=None, valeurs=None):
         + f'<input id="nom" name="nom" required maxlength="80" value="{echapper(valeurs.get("nom", ""))}">'
         + '<label for="telephone">Téléphone</label>'
         + f'<input id="telephone" name="telephone" required maxlength="20" value="{echapper(valeurs.get("telephone", ""))}">'
-        + '<label for="secteur">Rattachement</label>'
-        + f'<select id="secteur" name="secteur_id" required>{options}</select>'
-        + '<p class="aide">Chaque ligne suit l’ordre : région, préfecture, sous-préfecture ou commune, '
-        "quartier ou district, secteur ou village.</p>"
+        + rattachement
         + '<label for="latitude">Latitude</label>'
         + f'<input id="latitude" name="latitude" required inputmode="decimal" value="{echapper(valeurs.get("latitude", ""))}">'
         + '<label for="longitude">Longitude</label>'
@@ -148,36 +145,10 @@ def action_abonnement(ctx):
 
 def action_localite(ctx):
     _garder(ctx)
-    genre = (ctx.formulaire.get("genre") or "").strip()
-    if genre not in GENRES:
-        return page_abonnement(ctx, erreur="Le niveau de localité n’est pas reconnu.")
-    try:
-        nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom")
-        parent_brut = (ctx.formulaire.get("parent_id") or "").strip()
-        parent_id = int(parent_brut) if parent_brut else None
-    except ValeurRefusee as exc:
-        return page_abonnement(ctx, erreur=exc.message)
-    except ValueError:
-        return page_abonnement(ctx, erreur="Le rattachement n’est pas reconnu.")
-    with base() as conn:
-        if genre == "region":
-            if parent_id is not None:
-                return page_abonnement(ctx, erreur="Une région n’a pas de rattachement.")
-        else:
-            parent = conn.execute(
-                "SELECT genre FROM maille WHERE id = ?",
-                (parent_id,),
-            ).fetchone()
-            if parent is None or parent["genre"] != PARENT_GENRE[genre]:
-                return page_abonnement(
-                    ctx,
-                    erreur="Le rattachement doit être le niveau juste au-dessus.",
-                )
-        conn.execute(
-            "INSERT INTO maille (parent_id, genre, nom, exemple) VALUES (?, ?, ?, 0)",
-            (parent_id, genre, nom),
-        )
-    return Redirection("/ordures/abonnement?message=localite-enregistree")
+    return page_abonnement(
+        ctx,
+        erreur="Le découpage officiel des dix régions est déjà chargé. Il ne se ressaisit pas.",
+    )
 
 
 def page_fiche(ctx, reference, erreur=None):
@@ -476,29 +447,36 @@ def _fil():
     return '<p class="fil"><a href="/">Accueil</a> · <a href="/ordures">Collecte des ordures</a></p>'
 
 
-def _forme_localite(ctx, conn):
-    genres = "".join(
-        f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in GENRES.items()
-    )
-    parents = ['<option value="">Aucune, pour une région</option>']
-    for maille in conn.execute("SELECT id, genre, nom FROM maille ORDER BY nom").fetchall():
-        parents.append(
-            f'<option value="{int(maille["id"])}">'
-            f'{echapper(GENRES[maille["genre"]])} — {echapper(maille["nom"])}</option>'
+def _cascade(ctx, conn, action):
+    from mahh.decoupage import GENRES as NIVEAUX
+    from mahh.decoupage import PARENT, ancre, libelle_maille, options, selection
+
+    choisi = selection(conn, ctx.requete)
+    selects = []
+    for genre, libelle in NIVEAUX:
+        parent = PARENT.get(genre)
+        parent_id = choisi.get(parent) if parent else None
+        if genre != "region" and parent_id is None:
+            break
+        lignes = options(conn, genre, parent_id)
+        if not lignes and genre not in choisi:
+            break
+        choix = ['<option value="">Choisir</option>']
+        for ligne in lignes:
+            sel = " selected" if ligne["id"] == choisi.get(genre) else ""
+            choix.append(
+                f'<option value="{int(ligne["id"])}"{sel}>{echapper(libelle_maille(ligne))}</option>'
+            )
+        selects.append(
+            f'<label for="dec-{genre}">{echapper(libelle)}</label>'
+            f'<select id="dec-{genre}" name="{genre}">{"".join(choix)}</select>'
         )
-    return (
-        "<h2>Localité</h2>"
-        "<p>Indiquez d’abord la région, puis la préfecture, la commune, le quartier et le secteur.</p>"
-        '<form method="post" action="/ordures/localite" class="formulaire">'
-        + jeton_cache(ctx)
-        + '<label for="genre-localite">Niveau</label>'
-        + f'<select id="genre-localite" name="genre" required>{genres}</select>'
-        + '<label for="parent-localite">Rattachement</label>'
-        + f'<select id="parent-localite" name="parent_id">{"".join(parents)}</select>'
-        + '<label for="nom-localite">Nom</label>'
-        + '<input id="nom-localite" name="nom" required maxlength="80">'
-        + '<button type="submit">Enregistrer la localité</button></form>'
+    html = (
+        f'<form method="get" action="{echapper(action)}" class="formulaire" data-decoupage="1">'
+        + "".join(selects)
+        + '<button type="submit">Afficher ce niveau</button></form>'
     )
+    return html, choisi.get("secteur")
 
 
 def _forme_pme(ctx, conn):
@@ -506,15 +484,15 @@ def _forme_pme(ctx, conn):
         f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in GESTIONS.items()
     )
     jours = "".join(f'<option value="{jour}">{echapper(jour)}</option>' for jour in JOURS)
-    secteurs = ['<option value="">Choisir un secteur</option>']
-    for secteur in conn.execute(
-        "SELECT id, nom FROM maille WHERE genre = 'secteur' ORDER BY nom"
-    ).fetchall():
-        secteurs.append(
-            f'<option value="{int(secteur["id"])}">{echapper(secteur["nom"])}</option>'
-        )
+    _cascade_html, secteur_id = _cascade(ctx, conn, "/ordures/pme")
+    secteur = ""
+    if secteur_id:
+        secteur = f'<input type="hidden" name="secteur_id" value="{int(secteur_id)}">'
+    else:
+        secteur = "<p>Choisissez le secteur ou le village, puis enregistrez la PME.</p>"
     return (
-        "<h2>Enregistrer une PME</h2>"
+        _cascade_html
+        + "<h2>Enregistrer une PME</h2>"
         '<form method="post" action="/ordures/pme/enregistrer" class="formulaire">'
         + jeton_cache(ctx)
         + '<label for="nom-pme">Nom</label><input id="nom-pme" name="nom" required maxlength="80">'
@@ -528,8 +506,7 @@ def _forme_pme(ctx, conn):
         + '<input id="heure-pme" name="heure_collecte" required maxlength="40">'
         + '<label for="frais-pme">Frais hors jour (GNF)</label>'
         + '<input id="frais-pme" name="frais_hors_jour" required inputmode="numeric">'
-        + '<label for="secteur-pme">Secteur</label>'
-        + f'<select id="secteur-pme" name="secteur_id" required>{"".join(secteurs)}</select>'
+        + secteur
         + '<button type="submit">Enregistrer la PME</button></form>'
     )
 
@@ -572,19 +549,6 @@ def _chaine(conn, maille_id):
         courant = ligne["parent_id"]
     morceaux.reverse()
     return morceaux
-
-
-def _options_secteurs(conn, choisi):
-    secteurs = conn.execute(
-        "SELECT id FROM maille WHERE genre = 'secteur' ORDER BY nom"
-    ).fetchall()
-    options = ['<option value="">Choisir</option>']
-    for secteur in secteurs:
-        chaine = _chaine(conn, secteur["id"])
-        texte = " — ".join(m["nom"] for m in chaine)
-        sel = " selected" if str(secteur["id"]) == str(choisi or "") else ""
-        options.append(f'<option value="{int(secteur["id"])}"{sel}>{echapper(texte)}</option>')
-    return "".join(options)
 
 
 def _liste(couples):

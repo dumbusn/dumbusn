@@ -1,7 +1,7 @@
 """Organigramme des directions et attributions, tenus par l’administrateur."""
 
 from mahh.db import base
-from mahh.droits import exiger_admin
+from mahh.droits import FONCTIONS, exiger_admin
 from mahh.presentation import jeton_cache
 from mahh.reponse import ValeurRefusee
 from mahh.securite import maintenant, url_sure
@@ -23,7 +23,9 @@ def rendu_organigramme(ctx, conn, noeud_id=None, edition=True):
     return (
         '<section data-fonction="organigramme">'
         "<h2>Organigramme</h2>"
-        '<p class="chapeau">Schéma des directions. L’administrateur ajoute, déplace et retire les cases.</p>'
+        '<p class="chapeau">Chaîne affichée : ministre, secrétaire général, chef de cabinet, '
+        "directeurs, chefs de division, chefs de section, chargés d’études. "
+        "L’administrateur crée les postes et les rattache par le menu. Ce n’est pas un texte figé.</p>"
         f'<div class="schema" data-organigramme="1">{schema}</div>'
         f"{outils}"
         "</section>"
@@ -55,7 +57,7 @@ def action_creer_poste(ctx):
 
     exiger_admin(ctx)
     try:
-        nom, intitule, parent_id = _saisie_poste(ctx.formulaire)
+        nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
     except ValeurRefusee as exc:
         return page_directions(ctx, erreur=exc.message)
     with base() as conn:
@@ -75,10 +77,10 @@ def action_creer_poste(ctx):
         quand = maintenant()
         conn.execute(
             """
-            INSERT INTO organigramme (parent_id, nom, intitule, ordre, cree_le, modifie_le)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO organigramme (parent_id, nom, intitule, ordre, niveau, cree_le, modifie_le)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (parent_id, nom, intitule, ordre, quand, quand),
+            (parent_id, nom, intitule, ordre, niveau, quand, quand),
         )
     return _retour(ctx, "poste-cree")
 
@@ -88,7 +90,7 @@ def action_modifier_poste(ctx, poste_id):
 
     exiger_admin(ctx)
     try:
-        nom, intitule, parent_id = _saisie_poste(ctx.formulaire)
+        nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
     except ValeurRefusee as exc:
         return page_directions(ctx, erreur=exc.message)
     with base() as conn:
@@ -102,10 +104,10 @@ def action_modifier_poste(ctx, poste_id):
         conn.execute(
             """
             UPDATE organigramme
-            SET nom = ?, intitule = ?, parent_id = ?, modifie_le = ?
+            SET nom = ?, intitule = ?, parent_id = ?, niveau = ?, modifie_le = ?
             WHERE id = ?
             """,
-            (nom, intitule, parent_id, maintenant(), poste["id"]),
+            (nom, intitule, parent_id, niveau, maintenant(), poste["id"]),
         )
     return _retour(ctx, "poste-modifie")
 
@@ -195,13 +197,29 @@ def _saisie_poste(formulaire):
     nom = ligne(formulaire.get("nom"), 2, 120, "Nom")
     brut = (formulaire.get("intitule") or "").strip()
     intitule = ligne(brut, 2, 200, "Intitulé") if brut else ""
+    niveau = (formulaire.get("niveau") or "").strip()
+    if niveau and niveau not in _niveaux_poste():
+        raise ValeurRefusee("Ce niveau n’est pas dans la chaîne.")
     parent = (formulaire.get("parent_id") or "").strip()
     if not parent:
-        return nom, intitule, None
+        return nom, intitule, None, niveau
     try:
-        return nom, intitule, int(parent)
+        return nom, intitule, int(parent), niveau
     except ValueError as exc:
         raise ValeurRefusee("Le rattachement n’est pas reconnu.") from exc
+
+
+def _niveaux_poste():
+    return (
+        "ministre",
+        "secretaire_general",
+        "chef_cabinet",
+        "directeur",
+        "directeur_adjoint",
+        "chef_division",
+        "chef_section",
+        "charge_etudes",
+    )
 
 
 def _saisie_attribution(formulaire):
@@ -328,13 +346,17 @@ def _branche(poste, enfants):
     dessous = ""
     if suite:
         dessous = f'<div class="enfants">{"".join(_branche(enfant, enfants) for enfant in suite)}</div>'
+    niveau = FONCTIONS.get(poste["niveau"] or "", "")
+    marque = f' data-niveau="{echapper(poste["niveau"])}"' if poste["niveau"] else ""
     if poste["noeud_id"]:
         nom = (
-            f'<a href="/noeud/{int(poste["noeud_id"])}" data-nom="{echapper(poste["nom"])}">'
+            f'<a href="/noeud/{int(poste["noeud_id"])}" data-nom="{echapper(poste["nom"])}"{marque}>'
             f'{echapper(poste["nom"])}</a>'
         )
     else:
-        nom = f'<strong data-nom="{echapper(poste["nom"])}">{echapper(poste["nom"])}</strong>'
+        nom = f'<strong data-nom="{echapper(poste["nom"])}"{marque}>{echapper(poste["nom"])}</strong>'
+    if niveau:
+        nom += f'<p class="meta">{echapper(niveau)}</p>'
     intitule = (
         f'<p class="intitule">{echapper(poste["intitule"])}</p>' if poste["intitule"] else ""
     )
@@ -414,6 +436,8 @@ def _forme_organigramme(ctx, postes):
         '<input id="nom-poste" name="nom" maxlength="120" required>'
         '<label for="intitule-poste">Intitulé</label>'
         '<input id="intitule-poste" name="intitule" maxlength="200">'
+        '<label for="niveau-poste">Niveau dans la chaîne</label>'
+        f'<select id="niveau-poste" name="niveau">{_options_niveaux("")}</select>'
         '<label for="parent-poste">Rattachement</label>'
         f'<select id="parent-poste" name="parent_id">{options}</select>'
         '<button type="submit">Ajouter la case</button></form>'
@@ -445,6 +469,8 @@ def _forme_organigramme(ctx, postes):
             f'<input id="nom-{identifiant}" name="nom" maxlength="120" required value="{echapper(poste["nom"])}">'
             f'<label for="intitule-{identifiant}">Intitulé</label>'
             f'<input id="intitule-{identifiant}" name="intitule" maxlength="200" value="{echapper(poste["intitule"])}">'
+            f'<label for="niveau-{identifiant}">Niveau dans la chaîne</label>'
+            f'<select id="niveau-{identifiant}" name="niveau">{_options_niveaux(poste["niveau"] or "")}</select>'
             f'<label for="parent-{identifiant}">Rattachement</label>'
             f'<select id="parent-{identifiant}" name="parent_id">{choix}</select>'
             '<button type="submit">Enregistrer</button></form>'
@@ -454,6 +480,14 @@ def _forme_organigramme(ctx, postes):
         '<section class="outils"><h2>Construire l’organigramme</h2>'
         f"{ajout}<h3>Modifier les cases</h3>{''.join(lignes)}</section>"
     )
+
+
+def _options_niveaux(choisi):
+    options = ['<option value="">Sans niveau</option>']
+    for cle in _niveaux_poste():
+        sel = " selected" if cle == choisi else ""
+        options.append(f'<option value="{cle}"{sel}>{echapper(FONCTIONS[cle])}</option>')
+    return "".join(options)
 
 
 def _descendants(poste_id, postes):
