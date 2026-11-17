@@ -103,7 +103,7 @@ def _lien_fil(conn, utilisateur, noeud):
 
 def page_directions(ctx, erreur=None):
     exiger_connexion(ctx)
-    from mahh.organigramme import rendu_attributions, rendu_organigramme
+    from mahh.organigramme import rendu_attributions
 
     with base() as conn:
         domaines = conn.execute(
@@ -140,13 +140,11 @@ def page_directions(ctx, erreur=None):
             )
         if not blocs and not est_hierarchie(ctx.utilisateur):
             raise Interdit("Vous n’avez pas de privilège sur les directions.")
-        schema = rendu_organigramme(ctx, conn)
         attributions = rendu_attributions(ctx, conn)
     corps = (
         "<h1>Directions</h1>"
-        '<p class="chapeau">Les directions du ministère, leur place dans l’organigramme, '
-        "et les attributions de chacune.</p>"
-        + schema
+        '<p class="chapeau">Les directions du ministère et les attributions de chacune. '
+        "L’organigramme se construit à part, par l’administrateur.</p>"
         + attributions
         + "<h2>Dossiers</h2>"
         + "".join(blocs)
@@ -200,13 +198,11 @@ def _corps_noeud(ctx, conn, noeud, droits, fil, enfants, libelles):
         f'<p class="privileges" data-privileges="{echapper(privileges)}" data-admin="{admin}">'
         f"{echapper(libelle_droits(droits, ctx.utilisateur['administrateur']))}</p>"
     )
-    from mahh.organigramme import rendu_attributions, rendu_organigramme
+    from mahh.organigramme import rendu_attributions
 
     fonctions = ""
     if noeud["genre"] in ("domaine", "structure"):
-        fonctions = rendu_organigramme(
-            ctx, conn, noeud_id=noeud["id"], edition=False
-        ) + rendu_attributions(ctx, conn, noeud_id=noeud["id"])
+        fonctions = rendu_attributions(ctx, conn, noeud_id=noeud["id"])
     from mahh.indicateurs import LIBELLES, rendu as rendu_indicateurs
 
     if noeud["nom"] == "ANASP":

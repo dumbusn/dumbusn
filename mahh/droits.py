@@ -43,22 +43,16 @@ def roles_du_compte(utilisateur):
 
 
 def peut_tenir_organigramme(utilisateur):
-    """Là où le modèle dit DG, DGA et IT : ministre, secrétaire général,
-    chef de cabinet, ou administrateur."""
+    """L’arbre, l’annuaire et la création d’un agent sont des tâches d’administrateur."""
     if not utilisateur:
         return False
-    if utilisateur["administrateur"]:
-        return True
-    return bool(roles_du_compte(utilisateur) & {"ministre", "secretaire_general", "chef_cabinet"})
+    return bool(utilisateur["administrateur"])
 
 
 def exiger_organigramme(ctx):
     exiger_connexion(ctx)
     if not peut_tenir_organigramme(ctx.utilisateur):
-        raise Interdit(
-            "L’organigramme est tenu par le ministre, le secrétaire général, "
-            "le chef de cabinet, ou un administrateur."
-        )
+        raise Interdit("Cette page est réservée à l’administrateur.")
 
 
 def vide():
@@ -229,8 +223,6 @@ def entrees_menu(conn, utilisateur):
     if utilisateur is None:
         return []
     entrees = [("/", "Accueil", "accueil")]
-    if peut_voir_directions(conn, utilisateur) or peut_tenir_organigramme(utilisateur):
-        entrees.append(("/organigramme", "Organigramme", "organigramme"))
     if peut_voir_directions(conn, utilisateur):
         entrees.append(("/directions", "Directions", "directions"))
     if peut_voir_bsd(conn, utilisateur):
@@ -245,9 +237,10 @@ def entrees_menu(conn, utilisateur):
         entrees.append(("/eau/snape", "SNAPE", "snape"))
     if peut_gerer_vitrine(utilisateur):
         entrees.append(("/communication", "Communication", "communication"))
-    if peut_tenir_organigramme(utilisateur):
-        entrees.append(("/annuaire", "Annuaire", "annuaire"))
     if utilisateur["administrateur"]:
+        entrees.append(("/organigramme", "Organigramme", "organigramme"))
+        entrees.append(("/annuaire", "Annuaire", "annuaire"))
+        entrees.append(("/annuaire/nouveau", "Nouvel agent", "nouvel-agent"))
         entrees.append(("/groupes", "Groupes", "groupes"))
         entrees.append(("/journal", "Journal", "journal"))
     if (

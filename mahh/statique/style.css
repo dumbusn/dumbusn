@@ -216,8 +216,14 @@ optgroup { font-weight: 700; }
   gap: 0.55rem;
   min-height: 2.6rem;
   cursor: pointer;
-  padding-right: 22rem;
+  padding-right: 0.4rem;
 }
+.arbre details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.arbre details > ul { flex: 1 0 100%; width: 100%; }
 .arbre summary { list-style: none; }
 .arbre summary::-webkit-details-marker { display: none; }
 .arbre summary::before {
@@ -238,19 +244,29 @@ optgroup { font-weight: 700; }
 }
 .role-entite { color: var(--encre-douce); font-size: 0.85rem; }
 .actions-entite {
-  position: absolute;
-  right: 0.2rem;
-  top: 0.45rem;
+  position: static;
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.7rem;
-  font-size: 0.88rem;
+  gap: 0.4rem;
+  margin-left: auto;
   opacity: 0;
 }
 .arbre li:hover .actions-entite,
 .arbre li:focus-within .actions-entite { opacity: 1; }
-.feuille .actions-entite { top: 0.55rem; }
+.bouton-ligne {
+  display: inline-block;
+  margin: 0;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--filet);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--encre);
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+.bouton-ligne.danger { color: var(--rouge); border-color: #e7c4c4; }
 .danger-lien { color: var(--rouge); }
 .voile {
   display: none;
@@ -263,7 +279,8 @@ optgroup { font-weight: 700; }
   padding: 4vh 1rem;
   overflow: auto;
 }
-.voile:target { display: flex; }
+.voile[hidden] { display: none !important; }
+.voile:target { display: flex !important; }
 .dialogue {
   background: #fff;
   width: min(40rem, 100%);
@@ -275,8 +292,15 @@ optgroup { font-weight: 700; }
   flex-direction: column;
   gap: 0.15rem;
 }
-.dialogue .champ { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.55rem; }
-.dialogue .champ input, .dialogue .champ select { width: 100%; }
+.champ { display: flex; flex-direction: column; align-items: stretch; gap: 0.3rem; margin: 0.9rem 0 0; min-width: 0; clear: both; }
+.champ input, .champ select, .fiche-agent input, .fiche-agent select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+.fiche-agent { max-width: 36rem; }
+.mot-ligne { display: flex; gap: 0.5rem; align-items: center; }
+.mot-ligne input { flex: 1; width: auto; }
 .dialogue h2 { margin-top: 0; }
 .dialogue h3 { font-family: var(--sans); font-size: 0.95rem; margin: 1rem 0 0.4rem; }
 .fermer {
@@ -311,8 +335,6 @@ optgroup { font-weight: 700; }
 .barre-agents h2 { margin: 0.8rem 0; }
 .recherche { margin: 0; }
 .recherche input { width: min(22rem, 46vw); }
-.mot-ligne { display: flex; gap: 0.5rem; }
-.mot-ligne input { flex: 1; }
 .pied-dialogue { display: flex; justify-content: flex-end; gap: 0.6rem; margin: 1rem 0 0; }
 .recherche input { width: min(24rem, 100%); margin-left: auto; display: block; }
 .compteur-page { margin: 0 0 0.6rem; color: var(--encre-douce); }

@@ -59,6 +59,7 @@ from mahh.administration import (
     page_compte,
     page_groupe,
     page_groupes,
+    page_nouvel_agent,
     page_utilisateurs,
 )
 from mahh.config import hote, port
@@ -172,6 +173,7 @@ ROUTES = (
     ("POST", re.compile(r"^/groupes/(\d+)/retirer$"), action_retirer),
     ("POST", re.compile(r"^/groupes/(\d+)/droit$"), action_droit),
     ("POST", re.compile(r"^/groupes/(\d+)/bsd$"), action_bsd),
+    ("GET", re.compile(r"^/annuaire/nouveau$"), page_nouvel_agent),
     ("GET", re.compile(r"^/annuaire$"), page_utilisateurs),
     ("GET", re.compile(r"^/utilisateurs$"), page_utilisateurs),
     ("POST", re.compile(r"^/utilisateurs$"), action_utilisateur),

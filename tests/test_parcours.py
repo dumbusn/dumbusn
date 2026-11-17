@@ -223,20 +223,22 @@ def parcours(hote, numero):
     verifie("Agence nationale d’assainissement et de la salubrité publique" in page, "ANASP développé")
     verifie(statut == 200, "page ANASP")
     verifie("<li>Organigramme</li>" not in page and "<li>Attribution</li>" not in page, "ces libellés ne sont plus des lignes")
-    verifie('data-fonction="organigramme"' in page and 'data-fonction="attribution"' in page, "fonctions sur la direction")
+    verifie('data-fonction="attribution"' in page, "attributions sur la direction")
+    verifie("data-fonction=\"organigramme\"" not in page, "l’arbre n’est pas collé sur la direction")
     verifie('data-direction="ANASP"' in page and "Nombre de ZTT" in page, "menu ANASP et indicateurs")
     verifie("Libellés de la note, repris tels quels" not in page, "plus de liste brute")
-    anasp_poste = re.search(r'data-poste="(\d+)" data-nom="ANASP"', page)
-    verifie(anasp_poste is not None, "case ANASP")
+    _, _, schema, _ = admin.appel("GET", "/organigramme")
+    verifie("Aucune entité enregistrée" in schema, "l’arbre démarre vide")
+    verifie('data-nom="ANASP"' not in schema and 'data-nom="SEG"' not in schema, "pas d’organigramme prérempli")
+    verifie("Nouvelle entité racine" in schema and "Racine (aucun parent)" in schema, "l’administrateur crée depuis la racine")
     _, _, schema, _ = admin.appel(
         "POST",
         "/organigramme",
         {
             "nom": "Inspection",
             "intitule": "Contrôle interne",
-            "parent_id": anasp_poste.group(1),
-            "retour": "/directions",
-            "jeton": jeton(page),
+            "retour": "/organigramme",
+            "jeton": jeton(schema),
         },
     )
     verifie('data-nom="Inspection"' in schema and 'data-organigramme="1"' in schema, "case ajoutée au schéma")
@@ -247,8 +249,7 @@ def parcours(hote, numero):
         {
             "nom": "Inspection générale",
             "intitule": "Contrôle interne",
-            "parent_id": anasp_poste.group(1),
-            "retour": "/directions",
+            "retour": "/organigramme",
             "jeton": jeton(schema),
         },
     )
@@ -261,6 +262,7 @@ def parcours(hote, numero):
             "identifiant": "etudes",
             "nom": "Charge etudes",
             "mot_de_passe": "etudes-2026xx",
+            "structure_id": anasp.group(1),
             "jeton": jeton(page_users),
         },
     )
@@ -270,7 +272,7 @@ def parcours(hote, numero):
         {
             "code": "RACINE",
             "nom": "Cellule de suivi",
-            "retour": "/directions",
+            "retour": "/organigramme",
             "jeton": jeton(schema),
         },
     )
@@ -282,8 +284,8 @@ def parcours(hote, numero):
             "code": "ETU",
             "nom": "Etudes ANASP",
             "niveau": "charge_etudes",
-            "parent_id": anasp_poste.group(1),
-            "retour": "/directions",
+            "parent_id": inspection.group(1),
+            "retour": "/organigramme",
             "jeton": jeton(schema),
         },
     )
@@ -297,7 +299,7 @@ def parcours(hote, numero):
         f"/organigramme/{etudes_poste.group(1)}/affecter",
         {
             "utilisateur_id": personne.group(1),
-            "retour": "/directions",
+            "retour": "/organigramme",
             "jeton": jeton(schema),
         },
     )
@@ -587,7 +589,12 @@ def parcours(hote, numero):
     verifie("Note de suivi" in dossier and "Texte de la note de test." in dossier, "note ajoutée")
 
     _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
-    niveaux = re.search(r'id="niveau".*?</select>', page_users, re.S).group(0)
+    verifie("Nouvel agent" in page_users and "<h1>Annuaire</h1>" in page_users, "annuaire")
+    verifie("Nouvelle entité" not in page_users, "l’annuaire n’embarque pas le formulaire d’entité")
+    _, _, fiche, _ = admin.appel("GET", "/annuaire/nouveau")
+    verifie("Département / Service" in fiche and "Mot de passe temporaire" in fiche, "fiche de création")
+    verifie("Ajouter un rôle" in fiche, "rôles de l’agent")
+    niveaux = re.search(r'id="niveau".*?</select>', fiche, re.S).group(0)
     ordre = [valeur for valeur in re.findall(r'<option value="([^"]*)">', niveaux) if valeur]
     verifie(
         ordre[:8]
@@ -603,9 +610,7 @@ def parcours(hote, numero):
         ],
         "chaîne des niveaux",
     )
-    verifie("Secrétaire général" in page_users and "Chargé d’études" in page_users, "libellés des niveaux")
-    verifie("Nouvel agent" in page_users and "Département / Service" in page_users, "annuaire")
-    verifie("Ajouter un rôle" in page_users, "rôles de l’agent")
+    verifie("Secrétaire général" in fiche and "Chargé d’études" in fiche, "libellés des niveaux")
     _, _, sans_direction, _ = admin.appel(
         "POST",
         "/utilisateurs",
@@ -700,10 +705,9 @@ def parcours(hote, numero):
         "le ministre voit tout le ministère",
     )
     _, _, directions_ministre, _ = ministre.appel("GET", "/directions")
-    verifie(
-        "Nouvelle entité racine" in directions_ministre and "Racine (aucun parent)" in directions_ministre,
-        "le ministre crée une entité depuis la racine",
-    )
+    verifie("Nouvelle entité racine" not in directions_ministre, "le ministre ne construit pas l’organigramme")
+    statut, _, _, _ = ministre.appel("GET", "/organigramme", suivre=False)
+    verifie(statut == 403, "l’organigramme est réservé à l’administrateur")
     _, _, saisie, _ = admin.appel("GET", "/bsd/saisie")
     _, chemin, _, _ = admin.appel(
         "POST",
@@ -748,7 +752,7 @@ def parcours(hote, numero):
     verifie('data-nom="ANASP"' in ses_directions, "sa structure")
     verifie('data-nom="DGA"' not in ses_directions and 'data-nom="SEG"' not in ses_directions, "pas les autres")
     verifie("Organiser la salubrité des communes" in ses_directions, "son menu d’attributions")
-    verifie("Inspection générale" in ses_directions, "la case ajoutée sous sa direction")
+    verifie("Inspection générale" not in ses_directions, "l’arbre n’est pas sur la page des directions")
     verifie("Nouvelle entité racine" not in ses_directions, "l’outil reste à l’administrateur")
     _, _, compte, _ = direction.appel("GET", "/compte")
     statut, _, _, _ = direction.appel(
@@ -838,7 +842,7 @@ def parcours(hote, numero):
 
 
 def parcours_vitrine(admin, direction, hote, numero):
-    _, _, utilisateurs, _ = admin.appel("GET", "/utilisateurs")
+    _, _, utilisateurs, _ = admin.appel("GET", "/annuaire/nouveau")
     verifie('value="communication"' in utilisateurs, "l’administrateur peut accorder le rôle")
     admin.appel(
         "POST",
@@ -897,7 +901,8 @@ def parcours_vitrine(admin, direction, hote, numero):
     statut, _, missions, _ = anonyme.appel("GET", "/p/missions")
     verifie(statut == 200 and "Missions et attributions" in missions and "cellule de communication" in missions, "page missions")
     _, _, organigramme, _ = anonyme.appel("GET", "/p/organigramme")
-    verifie("ANASP" in organigramme and "Schéma construit par l’administration" in organigramme, "organigramme public")
+    verifie("Schéma construit par l’administration" in organigramme and "Inspection" in organigramme, "organigramme public")
+    verifie('data-nom="ANASP"' not in organigramme and "BSD" not in organigramme, "pas de schéma prérempli")
     statut, _, refuse, _ = direction.appel("GET", "/communication")
     verifie(statut == 403, "une direction n’ouvre pas la communication")
     _, _, accueil_direction, _ = direction.appel("GET", "/")

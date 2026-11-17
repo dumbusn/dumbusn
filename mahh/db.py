@@ -625,48 +625,22 @@ def migrer(conn):
     )
 
 
-def semer_organigramme(conn):
-    if conn.execute("SELECT COUNT(*) AS n FROM organigramme").fetchone()["n"]:
-        return
-    quand = maintenant()
-    domaines = conn.execute(
-        "SELECT * FROM noeud WHERE genre = 'domaine' ORDER BY ordre, nom"
-    ).fetchall()
-    for domaine in domaines:
-        curseur = conn.execute(
-            """
-            INSERT INTO organigramme (
-                parent_id, nom, intitule, ordre, noeud_id, cree_le, modifie_le
-            ) VALUES (NULL, ?, '', ?, ?, ?, ?)
-            """,
-            (domaine["nom"], domaine["ordre"], domaine["id"], quand, quand),
-        )
-        parent = curseur.lastrowid
-        structures = conn.execute(
-            """
-            SELECT * FROM noeud
-            WHERE parent_id = ? AND genre = 'structure'
-            ORDER BY ordre, nom
-            """,
-            (domaine["id"],),
-        ).fetchall()
-        for structure in structures:
-            conn.execute(
-                """
-                INSERT INTO organigramme (
-                    parent_id, nom, intitule, ordre, noeud_id, cree_le, modifie_le
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    parent,
-                    structure["nom"],
-                    structure["intitule"],
-                    structure["ordre"],
-                    structure["id"],
-                    quand,
-                    quand,
-                ),
+def retirer_organigramme_prerempli(conn):
+    """L’arbre ne reprend plus les directions du classeur. L’administrateur le construit."""
+    conn.execute(
+        """
+        UPDATE utilisateur SET organigramme_id = NULL
+        WHERE organigramme_id IN (
+            WITH RECURSIVE semis(id) AS (
+                SELECT id FROM organigramme WHERE noeud_id IS NOT NULL
+                UNION
+                SELECT o.id FROM organigramme o JOIN semis s ON o.parent_id = s.id
             )
+            SELECT id FROM semis
+        )
+        """
+    )
+    conn.execute("DELETE FROM organigramme WHERE noeud_id IS NOT NULL")
 
 
 def preparer():
@@ -677,7 +651,7 @@ def preparer():
         info = semer(conn)
         retirer_jeu(conn)
         semer_vitrine(conn)
-        semer_organigramme(conn)
+        retirer_organigramme_prerempli(conn)
         from mahh.decoupage import semer_decoupage
 
         semer_decoupage(conn)

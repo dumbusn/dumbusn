@@ -1,8 +1,7 @@
 """Organigramme des directions et attributions.
 
-Les entités se créent depuis la racine, avec un code, un rôle et un rattachement.
-Le ministre, le secrétaire général, le chef de cabinet ou un administrateur
-tiennent cet organigramme. L’affectation donne à la personne le rôle de l’entité.
+L’arbre démarre vide. Seul l’administrateur crée une entité racine, puis des
+sous-entités (code, nom, rattachement) et y affecte des agents déjà créés.
 """
 
 import re
@@ -19,9 +18,7 @@ _ROLES_MINISTERE = ("ministre", "secretaire_general", "chef_cabinet")
 
 
 def page_organigramme(ctx, erreur=None):
-    from mahh.droits import exiger_connexion
-
-    exiger_connexion(ctx)
+    exiger_organigramme(ctx)
     with base() as conn:
         corps = rendu_organigramme(ctx, conn, plein=True)
     return page("Organigramme", corps, ctx, actif="organigramme", erreur=erreur)
@@ -85,19 +82,17 @@ def rendu_attributions(ctx, conn, noeud_id=None):
 
 
 def action_creer_poste(ctx):
-    from mahh.documents import page_directions
-
     exiger_organigramme(ctx)
     try:
         code, nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
     except ValeurRefusee as exc:
-        return page_directions(ctx, erreur=exc.message)
+        return page_organigramme(ctx, erreur=exc.message)
     with base() as conn:
         try:
             _verifier_parent(conn, parent_id, None)
             _verifier_code(conn, code, None)
         except ValeurRefusee as exc:
-            return page_directions(ctx, erreur=exc.message)
+            return page_organigramme(ctx, erreur=exc.message)
         if parent_id is None:
             ordre = conn.execute(
                 "SELECT COALESCE(MAX(ordre), 0) + 1 AS n FROM organigramme WHERE parent_id IS NULL"
@@ -120,22 +115,20 @@ def action_creer_poste(ctx):
 
 
 def action_modifier_poste(ctx, poste_id):
-    from mahh.documents import page_directions
-
     exiger_organigramme(ctx)
     try:
         code, nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
     except ValeurRefusee as exc:
-        return page_directions(ctx, erreur=exc.message)
+        return page_organigramme(ctx, erreur=exc.message)
     with base() as conn:
         poste = _poste(conn, poste_id)
         if poste is None:
-            return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
+            return page_organigramme(ctx, erreur="Cette case n’est pas dans l’organigramme.")
         try:
             _verifier_parent(conn, parent_id, poste["id"])
             _verifier_code(conn, code, poste["id"])
         except ValeurRefusee as exc:
-            return page_directions(ctx, erreur=exc.message)
+            return page_organigramme(ctx, erreur=exc.message)
         conn.execute(
             """
             UPDATE organigramme
@@ -148,15 +141,13 @@ def action_modifier_poste(ctx, poste_id):
 
 
 def action_retirer_poste(ctx, poste_id):
-    from mahh.documents import page_directions
-
     exiger_organigramme(ctx)
     with base() as conn:
         poste = _poste(conn, poste_id)
         if poste is None:
-            return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
+            return page_organigramme(ctx, erreur="Cette case n’est pas dans l’organigramme.")
         if poste["noeud_id"]:
-            return page_directions(
+            return page_organigramme(
                 ctx,
                 erreur="Cette case est une direction du ministère. Retirez seulement une case ajoutée.",
             )
@@ -169,9 +160,9 @@ def action_retirer_poste(ctx, poste_id):
             (poste["id"],),
         ).fetchone()["n"]
         if enfants or agents:
-            return page_directions(
+            return page_organigramme(
                 ctx,
-                erreur="Cette entité a encore des rattachements ou des personnes. Retirez-les d’abord.",
+                erreur="La suppression échouera si des sous-entités, des agents ou des documents y sont rattachés.",
             )
         conn.execute("DELETE FROM organigramme WHERE id = ?", (poste["id"],))
     return _retour(ctx, "poste-retire")
@@ -182,23 +173,21 @@ def action_affecter_liste(ctx):
 
 
 def action_affecter(ctx, poste_id):
-    from mahh.documents import page_directions
-
     exiger_organigramme(ctx)
     try:
         utilisateur_id = int((ctx.formulaire.get("utilisateur_id") or "").strip())
     except ValueError:
-        return page_directions(ctx, erreur="Choisissez une personne.")
+        return page_organigramme(ctx, erreur="Choisissez une personne.")
     with base() as conn:
         poste = _poste(conn, poste_id)
         if poste is None:
-            return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
+            return page_organigramme(ctx, erreur="Cette case n’est pas dans l’organigramme.")
         personne = conn.execute(
             "SELECT id, fonction FROM utilisateur WHERE id = ? AND actif = 1",
             (utilisateur_id,),
         ).fetchone()
         if personne is None:
-            return page_directions(ctx, erreur="Cette personne n’est pas dans l’annuaire.")
+            return page_organigramme(ctx, erreur="Cette personne n’est pas dans l’annuaire.")
         # Le modèle ne change que le rattachement. Le rôle reste celui de la fiche.
         # Le périmètre de direction suit l’entité quand elle est sous une direction.
         structure_id = _structure_du_poste(conn, poste)
@@ -218,17 +207,15 @@ def action_affecter(ctx, poste_id):
 
 
 def action_desaffecter(ctx, poste_id):
-    from mahh.documents import page_directions
-
     exiger_organigramme(ctx)
     try:
         utilisateur_id = int((ctx.formulaire.get("utilisateur_id") or "").strip())
     except ValueError:
-        return page_directions(ctx, erreur="Choisissez une personne.")
+        return page_organigramme(ctx, erreur="Choisissez une personne.")
     with base() as conn:
         poste = _poste(conn, poste_id)
         if poste is None:
-            return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
+            return page_organigramme(ctx, erreur="Cette case n’est pas dans l’organigramme.")
         conn.execute(
             """
             UPDATE utilisateur
@@ -555,12 +542,15 @@ def _actions_entite(ctx, poste):
     chemin = ctx.chemin if ctx.chemin in ("/organigramme", "/directions") else "/organigramme"
     retrait = ""
     if not poste["noeud_id"]:
-        retrait = f'<a class="danger-lien" href="{chemin}?retirer={identifiant}#retirer-entite" title="Supprimer">Supprimer</a>'
+        retrait = (
+            f'<a class="bouton-ligne danger" href="{chemin}?retirer={identifiant}#retirer-entite">'
+            "Supprimer</a>"
+        )
     return (
         '<span class="actions-entite">'
-        f'<a href="{chemin}?affecter={identifiant}#affecter-agent" title="Affecter des agents">Affecter</a>'
-        f'<a href="{chemin}?parent={identifiant}#nouvelle-entite" title="Sous-entité">Sous-entité</a>'
-        f'<a href="{chemin}?modifier={identifiant}#modifier-entite" title="Modifier">Modifier</a>'
+        f'<a class="bouton-ligne" href="{chemin}?affecter={identifiant}#affecter-agent">Affecter</a>'
+        f'<a class="bouton-ligne" href="{chemin}?parent={identifiant}#nouvelle-entite">Sous-entité</a>'
+        f'<a class="bouton-ligne" href="{chemin}?modifier={identifiant}#modifier-entite">Modifier</a>'
         f"{retrait}</span>"
     )
 
@@ -617,18 +607,16 @@ def _dialogues(ctx, conn, postes, membres):
     )
     retour = ctx.chemin if ctx.chemin in ("/organigramme", "/directions") else "/organigramme"
     creation = (
-        f'<div class="voile" id="nouvelle-entite"><form class="dialogue" method="post" action="/organigramme">'
+        f'<div class="voile" id="nouvelle-entite" hidden><form class="dialogue" method="post" action="/organigramme">'
         f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
         "<h2>Nouvelle entité</h2>"
         '<p class="chapeau">Direction, département ou service. Le code doit être unique.</p>'
         f"{jeton_cache(ctx)}"
         f'<input type="hidden" name="retour" value="{echapper(retour)}">'
-        '<div class="deux-champs codes">'
         '<div class="champ"><label for="code-poste">Code *</label>'
         '<input id="code-poste" name="code" maxlength="20" required autocomplete="off" class="majuscules"></div>'
         '<div class="champ"><label for="nom-poste">Nom *</label>'
         '<input id="nom-poste" name="nom" maxlength="120" required></div>'
-        "</div>"
         '<div class="champ"><label for="parent-poste">Rattachement</label>'
         f'<select id="parent-poste" name="parent_id">{_options_parents(postes, parent_voulu, set())}</select></div>'
         '<p class="pied-dialogue"><a class="bouton secondaire" href="'
@@ -641,18 +629,16 @@ def _dialogues(ctx, conn, postes, membres):
     if cible is not None:
         exclus = {cible["id"]}
         edition = (
-            f'<div class="voile" id="modifier-entite"><form class="dialogue" method="post" '
+            f'<div class="voile" id="modifier-entite" hidden><form class="dialogue" method="post" '
             f'action="/organigramme/{int(cible["id"])}">'
             f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
             "<h2>Modifier l’entité</h2>"
             f"{jeton_cache(ctx)}"
             f'<input type="hidden" name="retour" value="{echapper(retour)}">'
-            '<div class="deux-champs codes">'
             '<div class="champ"><label for="code-modifier">Code *</label>'
             f'<input id="code-modifier" name="code" maxlength="20" value="{echapper(cible["code"] or "")}" class="majuscules"></div>'
             '<div class="champ"><label for="nom-modifier">Nom *</label>'
             f'<input id="nom-modifier" name="nom" maxlength="120" required value="{echapper(cible["nom"])}"></div>'
-            "</div>"
             '<div class="champ"><label for="parent-modifier">Rattachement</label>'
             f'<select id="parent-modifier" name="parent_id">'
             f'{_options_parents(postes, cible["parent_id"], exclus)}</select></div>'
@@ -670,7 +656,7 @@ def _dialogues(ctx, conn, postes, membres):
     confirmation = ""
     if retire is not None:
         confirmation = (
-            f'<div class="voile" id="retirer-entite"><form class="dialogue" method="post" '
+            f'<div class="voile" id="retirer-entite" hidden><form class="dialogue" method="post" '
             f'action="/organigramme/{int(retire["id"])}/retirer">'
             f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
             f"<h2>Supprimer « {echapper(retire['nom'])} » ?</h2>"
@@ -726,7 +712,7 @@ def _dialogue_affectation(ctx, cible, personnes, noms_entites, retour, choix_per
             "</button></form></li>"
         )
     return (
-        f'<div class="voile" id="affecter-agent"><div class="dialogue large">'
+        f'<div class="voile" id="affecter-agent" hidden><div class="dialogue large">'
         f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
         f"<h2>Affecter des agents à « {echapper(cible['nom'])} »</h2>"
         "<p class=\"chapeau\">Cliquez sur un agent pour l’ajouter, ou sur × pour le retirer. "

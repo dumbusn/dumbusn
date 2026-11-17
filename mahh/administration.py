@@ -284,7 +284,6 @@ def action_bsd(ctx, groupe_id):
 def page_utilisateurs(ctx, erreur=None):
     exiger_organigramme(ctx)
     recherche = (ctx.requete.get("q") or "").strip().lower()
-    entite_vue = (ctx.requete.get("entite") or "").strip()
     with base() as conn:
         personnes = conn.execute(
             "SELECT * FROM utilisateur WHERE actif = 1 ORDER BY nom, identifiant"
@@ -338,9 +337,7 @@ def page_utilisateurs(ctx, erreur=None):
             f'<td>{echapper(personne["intitule_poste"] or "")}</td>'
             f'<td>{echapper(departement)}</td>'
             f'<td class="roles">{badges}</td>'
-            f'<td class="actions-table">{retrait}'
-            f'<a class="bouton secondaire" href="/annuaire?gerer={int(personne["id"])}#nouvel-agent">Gérer</a>'
-            "</td></tr>"
+            f'<td class="actions-table">{retrait}</td></tr>'
         )
     vide = '<tr><td colspan="5">Aucun agent pour cette recherche.</td></tr>' if not lignes else ""
     corps = (
@@ -351,7 +348,7 @@ def page_utilisateurs(ctx, erreur=None):
         '<p class="chapeau">Les agents du ministère, leur entité et leurs rôles. '
         "Chaque personne ne voit que ce que son rôle autorise.</p>"
         "</div>"
-        '<a class="bouton" href="#nouvel-agent">+ Nouvel agent</a>'
+        '<a class="bouton" href="/annuaire/nouveau">+ Nouvel agent</a>'
         "</header>"
         f'<p class="compteur-page">{len(personnes)} agent{"s" if len(personnes) != 1 else ""}</p>'
         '<section class="carte-arbre"><div class="barre-agents"><h2>Agents</h2>'
@@ -365,32 +362,38 @@ def page_utilisateurs(ctx, erreur=None):
         "</tr></thead><tbody>"
         + ("".join(lignes) or vide)
         + "</tbody></table></section>"
-        + _fiche_agent(ctx, entites, entite_vue)
     )
     return page("Annuaire", corps, ctx, actif="annuaire", erreur=erreur)
 
 
-def _fiche_agent(ctx, entites, entite_vue):
+def page_nouvel_agent(ctx, erreur=None):
+    exiger_organigramme(ctx)
+    with base() as conn:
+        entites = conn.execute(
+            "SELECT id, code, nom FROM organigramme ORDER BY ordre, nom"
+        ).fetchall()
+    return page("Nouvel agent", _fiche_agent(ctx, entites), ctx, actif="nouvel-agent", erreur=erreur)
+
+
+def _fiche_agent(ctx, entites):
     options_entites = ['<option value="">— Non affecté —</option>']
     for entite in entites:
-        sel = " selected" if str(entite["id"]) == entite_vue else ""
         marque = f'{entite["code"]} · ' if entite["code"] else ""
         options_entites.append(
-            f'<option value="{int(entite["id"])}"{sel}>{echapper(marque + entite["nom"])}</option>'
+            f'<option value="{int(entite["id"])}">{echapper(marque + entite["nom"])}</option>'
         )
     return (
-        '<div class="voile" id="nouvel-agent"><form class="dialogue" method="post" action="/utilisateurs">'
-        '<a class="fermer" href="/annuaire" aria-label="Fermer">×</a>'
-        "<h2>Nouvel agent</h2>"
-        '<p class="chapeau">Création du compte et affectation dans l’organigramme.</p>'
-        "<h3>Compte</h3>"
+        '<header class="org-entete"><div>'
+        '<p class="sur-titre">Administration</p>'
+        "<h1>Nouvel agent</h1>"
+        '<p class="chapeau">Création du compte. Le rattachement à une entité est facultatif.</p>'
+        "</div></header>"
+        '<form class="formulaire fiche-agent" method="post" action="/utilisateurs">'
         + jeton_cache(ctx)
-        + '<div class="deux-champs">'
         + '<div class="champ"><label for="nom">Nom complet *</label>'
         + '<input id="nom" name="nom" maxlength="80" required autocomplete="name"></div>'
         + '<div class="champ"><label for="courriel">E-mail professionnel</label>'
         + '<input id="courriel" name="courriel" type="email" maxlength="120" autocomplete="off"></div>'
-        + "</div>"
         + '<div class="champ"><label for="identifiant">Identifiant de connexion *</label>'
         + '<input id="identifiant" name="identifiant" maxlength="40" required autocomplete="off"></div>'
         + '<div class="champ"><label for="mot">Mot de passe temporaire *</label>'
@@ -398,8 +401,6 @@ def _fiche_agent(ctx, entites, entite_vue):
         + '<input id="mot" name="mot_de_passe" type="text" required autocomplete="new-password">'
         + '<button type="button" class="secondaire" data-regenerer="mot">Régénérer</button>'
         + "</div></div>"
-        + "<h3>Affectation</h3>"
-        + '<div class="deux-champs">'
         + '<div class="champ"><label for="matricule">Matricule</label>'
         + '<input id="matricule" name="matricule" maxlength="40" autocomplete="off"></div>'
         + '<div class="champ"><label for="poste">Poste</label>'
@@ -408,20 +409,17 @@ def _fiche_agent(ctx, entites, entite_vue):
         + '<input id="telephone" name="telephone" maxlength="40" autocomplete="off"></div>'
         + '<div class="champ"><label for="departement">Département / Service</label>'
         + f'<select id="departement" name="organigramme_id">{"".join(options_entites)}</select></div>'
-        + "</div>"
-        + "<h3>Rôles attribués</h3>"
-        + '<p class="aide">Le rôle choisi, avec celui de l’entité, ouvre les écrans du compte.</p>'
-        + '<label for="niveau">Ajouter un rôle…</label>'
+        + '<div class="champ"><label for="niveau">Rôles</label>'
         + '<select id="niveau" name="fonction" data-niveaux="1">'
         + '<option value="">Ajouter un rôle…</option>'
         + "".join(f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in NIVEAUX)
         + '<option value="bsd">BSD</option>'
         + '<option value="communication">Cellule de communication</option>'
-        + "</select>"
+        + "</select></div>"
         + '<label class="case"><input type="checkbox" name="administrateur"> Administrateur de l’application</label>'
         + '<p class="pied-dialogue"><a class="bouton secondaire" href="/annuaire">Annuler</a>'
         + '<button type="submit">Créer le compte</button></p>'
-        + "</form></div>"
+        + "</form>"
     )
 
 
@@ -432,23 +430,23 @@ def action_utilisateur(ctx):
         nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom affiché")
         mot = mot_de_passe(ctx.formulaire.get("mot_de_passe"))
     except ValeurRefusee as exc:
-        return page_utilisateurs(ctx, erreur=exc.message)
+        return page_nouvel_agent(ctx, erreur=exc.message)
     admin = 1 if ctx.formulaire.get("administrateur") is not None else 0
     fonction = (ctx.formulaire.get("fonction") or "").strip()
     if fonction not in FONCTIONS and fonction not in ("", FONCTION_COMMUNICATION):
-        return page_utilisateurs(ctx, erreur="Ce niveau n’est pas reconnu.")
+        return page_nouvel_agent(ctx, erreur="Ce niveau n’est pas reconnu.")
     roles = fonction
     with base() as conn:
         if conn.execute(
             "SELECT id FROM utilisateur WHERE lower(identifiant) = lower(?)", (ident,)
         ).fetchone():
-            return page_utilisateurs(ctx, erreur="Cet identifiant est déjà utilisé.")
+            return page_nouvel_agent(ctx, erreur="Cet identifiant est déjà utilisé.")
         structure_id = _structure_compte(conn, ctx.formulaire)
         if structure_id == "invalide":
-            return page_utilisateurs(ctx, erreur="La direction n’est pas dans l’arbre.")
+            return page_nouvel_agent(ctx, erreur="La direction n’est pas dans l’arbre.")
         organigramme_id = _entite_compte(conn, ctx.formulaire)
         if organigramme_id == "invalide":
-            return page_utilisateurs(ctx, erreur="Cette entité n’est pas dans l’organigramme.")
+            return page_nouvel_agent(ctx, erreur="Cette entité n’est pas dans l’organigramme.")
         if organigramme_id and not structure_id:
             from mahh.organigramme import _poste, _structure_du_poste
 
@@ -459,10 +457,10 @@ def action_utilisateur(ctx):
                     fonction = poste["niveau"]
                     roles = fonction
         if fonction in NIVEAUX_DIRECTION and not structure_id:
-            return page_utilisateurs(ctx, erreur="Choisissez la direction rattachée.")
+            return page_nouvel_agent(ctx, erreur="Choisissez la direction rattachée.")
         courriel = (ctx.formulaire.get("courriel") or "").strip()
         if courriel and ("@" not in courriel or len(courriel) > 120):
-            return page_utilisateurs(ctx, erreur="L’adresse électronique n’est pas recevable.")
+            return page_nouvel_agent(ctx, erreur="L’adresse électronique n’est pas recevable.")
         matricule = (ctx.formulaire.get("matricule") or "").strip()[:40]
         telephone = (ctx.formulaire.get("telephone") or "").strip()[:40]
         intitule = (ctx.formulaire.get("intitule_poste") or "").strip()[:120]
