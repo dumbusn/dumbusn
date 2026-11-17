@@ -277,6 +277,18 @@ def parcours(hote, numero):
         },
     )
     verifie('data-code="RACINE"' in schema and 'data-nom="Cellule de suivi"' in schema, "entité à la racine")
+    verifie(
+        ">Affecter</a> " in schema and ">Sous-entité</a> " in schema and ">Modifier</a> " in schema
+        and ">Supprimer</button>" in schema,
+        "quatre actions séparées",
+    )
+    cellule = re.search(r'data-poste="(\d+)" data-nom="Cellule de suivi"', schema)
+    _, _, schema, _ = admin.appel(
+        "POST",
+        f"/organigramme/{cellule.group(1)}/retirer",
+        {"retour": "/organigramme", "jeton": jeton(schema)},
+    )
+    verifie('data-nom="Cellule de suivi"' not in schema, "une feuille sans agent est supprimée")
     _, _, schema, _ = admin.appel(
         "POST",
         "/organigramme",
@@ -290,6 +302,11 @@ def parcours(hote, numero):
         },
     )
     verifie('data-code="ETU"' in schema, "entité rattachée avec un rôle")
+    _, _, bloque, _ = admin.appel("GET", f"/organigramme?retirer={inspection.group(1)}")
+    verifie(
+        "Supprimez les sous-entités" in bloque and 'data-nom="Inspection générale"' in bloque,
+        "une entité occupée explique pourquoi elle reste",
+    )
     etudes_poste = re.search(r'data-poste="(\d+)" data-nom="Etudes ANASP"', schema)
     verifie(etudes_poste is not None, "case études")
     personne = re.search(r'value="(\d+)" data-identifiant="etudes"', schema)

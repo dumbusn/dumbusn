@@ -36,6 +36,10 @@ def rendu_organigramme(ctx, conn, noeud_id=None, edition=True, plein=False):
     nombre = len(postes) if noeud_id is None else _compter_branche(racines, enfants)
     libelle = "1 entité" if nombre == 1 else f"{nombre} entités"
     outils = _dialogues(ctx, conn, postes, membres) if tenir else ""
+    panneau = ""
+    if tenir and noeud_id is None:
+        requete = ctx.requete if hasattr(ctx, "requete") else {}
+        panneau = _panneau_suppression(ctx, postes, enfants, membres, _entier(requete.get("retirer")))
     bouton = ""
     if tenir:
         bouton = '<a class="bouton" href="#nouvelle-entite">+ Nouvelle entité racine</a>'
@@ -51,6 +55,7 @@ def rendu_organigramme(ctx, conn, noeud_id=None, edition=True, plein=False):
         "</div>"
         f"{bouton}"
         "</header>"
+        f"{panneau}"
         '<section class="carte-arbre">'
         f"<h2>Arborescence ({libelle})</h2>"
         f'<ul class="arbre">{arbre}</ul>'
@@ -160,12 +165,27 @@ def action_retirer_poste(ctx, poste_id):
             (poste["id"],),
         ).fetchone()["n"]
         if enfants or agents:
-            return page_organigramme(
-                ctx,
-                erreur="La suppression échouera si des sous-entités, des agents ou des documents y sont rattachés.",
-            )
+            from mahh.reponse import Redirection
+
+            return Redirection(f"/organigramme?retirer={int(poste['id'])}")
         conn.execute("DELETE FROM organigramme WHERE id = ?", (poste["id"],))
     return _retour(ctx, "poste-retire")
+
+
+def action_detacher(ctx, poste_id):
+    """Retire les agents de l’entité, sans changer leur rôle."""
+    exiger_organigramme(ctx)
+    with base() as conn:
+        poste = _poste(conn, poste_id)
+        if poste is None:
+            return page_organigramme(ctx, erreur="Cette case n’est pas dans l’organigramme.")
+        conn.execute(
+            "UPDATE utilisateur SET organigramme_id = NULL WHERE organigramme_id = ?",
+            (poste["id"],),
+        )
+    from mahh.reponse import Redirection
+
+    return Redirection(f"/organigramme?retirer={int(poste['id'])}")
 
 
 def action_affecter_liste(ctx):
@@ -519,10 +539,10 @@ def _ligne_entite(ctx, poste, enfants, membres, tenir, profondeur):
     compteur = (
         f'<span class="compteur" title="{len(gens)}">{len(gens)}</span>' if gens else ""
     )
-    actions = _actions_entite(ctx, poste) if tenir else ""
+    actions = _actions_entite(ctx, poste, suite, gens) if tenir else ""
     etiquette = (
-        f'<span class="etiquette-entite" {attributs}>{code}'
-        f'<span class="nom-entite">{nom}</span>{role_html}{compteur}{affectes}</span>'
+        f'<span class="etiquette-entite" {attributs}>{code} '
+        f'<span class="nom-entite">{nom}</span> {role_html} {compteur}{affectes}</span>'
     )
     if suite:
         dessous = "".join(
@@ -537,21 +557,91 @@ def _ligne_entite(ctx, poste, enfants, membres, tenir, profondeur):
     return f'<li class="feuille"><div class="ligne-org">{etiquette}{actions}</div></li>'
 
 
-def _actions_entite(ctx, poste):
+def _actions_entite(ctx, poste, enfants, membres):
     identifiant = int(poste["id"])
-    chemin = ctx.chemin if ctx.chemin in ("/organigramme", "/directions") else "/organigramme"
-    retrait = ""
-    if not poste["noeud_id"]:
+    chemin = "/organigramme"
+    boutons = (
+        f'<a class="bouton secondaire bouton-ligne" href="{chemin}?affecter={identifiant}#affecter-agent">Affecter</a> '
+        f'<a class="bouton secondaire bouton-ligne" href="{chemin}?parent={identifiant}#nouvelle-entite">Sous-entité</a> '
+        f'<a class="bouton secondaire bouton-ligne" href="{chemin}?modifier={identifiant}#modifier-entite">Modifier</a> '
+    )
+    if poste["noeud_id"]:
+        return f'<span class="actions-entite">{boutons}</span>'
+    if not enfants and not membres:
         retrait = (
-            f'<a class="bouton-ligne danger" href="{chemin}?retirer={identifiant}#retirer-entite">'
-            "Supprimer</a>"
+            f'<form class="action-ligne" method="post" action="/organigramme/{identifiant}/retirer">'
+            f"{jeton_cache(ctx)}"
+            '<input type="hidden" name="retour" value="/organigramme">'
+            '<button type="submit" class="danger bouton-ligne">Supprimer</button></form>'
+        )
+    else:
+        retrait = (
+            f'<a class="bouton secondaire bouton-ligne danger" href="{chemin}?retirer={identifiant}">Supprimer</a>'
+        )
+    return f'<span class="actions-entite">{boutons}{retrait}</span>'
+
+
+def _panneau_suppression(ctx, postes, enfants, membres, retirer_id):
+    if not retirer_id:
+        return ""
+    poste = next((element for element in postes if element["id"] == retirer_id), None)
+    if poste is None or poste["noeud_id"]:
+        return ""
+    fils = enfants.get(poste["id"], [])
+    gens = membres.get(poste["id"], [])
+    identifiant = int(poste["id"])
+    if not fils and not gens:
+        return (
+            '<section class="carte-arbre alerte-suppression">'
+            f"<h2>Supprimer « {echapper(poste['nom'])} »</h2>"
+            "<p>Cette entité n’a ni sous-entité ni agent. Elle peut être supprimée.</p>"
+            f'<form method="post" action="/organigramme/{identifiant}/retirer">'
+            f"{jeton_cache(ctx)}"
+            '<input type="hidden" name="retour" value="/organigramme">'
+            '<button type="submit" class="danger">Supprimer</button></form>'
+            "</section>"
+        )
+    blocs = []
+    if gens:
+        texte = "1 agent y est encore affecté." if len(gens) == 1 else f"{len(gens)} agents y sont encore affectés."
+        blocs.append(
+            f"<p>{texte} Détachez-les, puis supprimez l’entité.</p>"
+            f'<form method="post" action="/organigramme/{identifiant}/detacher">'
+            f"{jeton_cache(ctx)}"
+            '<button type="submit" class="secondaire">Détacher les agents</button></form>'
+        )
+    if fils:
+        texte = (
+            "1 sous-entité y est rattachée."
+            if len(fils) == 1
+            else f"{len(fils)} sous-entités y sont rattachées."
+        )
+        lignes = []
+        for enfant in fils:
+            nom = echapper(enfant["nom"])
+            if enfant["noeud_id"] or enfants.get(enfant["id"]) or membres.get(enfant["id"]):
+                lignes.append(
+                    f'<li><a class="bouton secondaire" href="/organigramme?retirer={int(enfant["id"])}">'
+                    f"Supprimer « {nom} » d’abord</a></li>"
+                )
+            else:
+                lignes.append(
+                    "<li>"
+                    f'<form method="post" action="/organigramme/{int(enfant["id"])}/retirer">'
+                    f"{jeton_cache(ctx)}"
+                    f'<input type="hidden" name="retour" value="/organigramme?retirer={identifiant}">'
+                    f'<button type="submit" class="danger">Supprimer « {nom} »</button></form></li>'
+                )
+        blocs.append(
+            f"<p>{texte} Supprimez les sous-entités d’abord.</p>"
+            f'<ul class="actions-detacher">{"".join(lignes)}</ul>'
         )
     return (
-        '<span class="actions-entite">'
-        f'<a class="bouton-ligne" href="{chemin}?affecter={identifiant}#affecter-agent">Affecter</a>'
-        f'<a class="bouton-ligne" href="{chemin}?parent={identifiant}#nouvelle-entite">Sous-entité</a>'
-        f'<a class="bouton-ligne" href="{chemin}?modifier={identifiant}#modifier-entite">Modifier</a>'
-        f"{retrait}</span>"
+        '<section class="carte-arbre alerte-suppression">'
+        f"<h2>Supprimer « {echapper(poste['nom'])} »</h2>"
+        "<p>La suppression est refusée tant que des sous-entités ou des agents y sont rattachés.</p>"
+        + "".join(blocs)
+        + "</section>"
     )
 
 
@@ -588,7 +678,6 @@ def _dialogues(ctx, conn, postes, membres):
     requete = ctx.requete if hasattr(ctx, "requete") else {}
     parent_voulu = _entier(requete.get("parent"))
     modifier_id = _entier(requete.get("modifier"))
-    retirer_id = _entier(requete.get("retirer"))
     affecter_id = _entier(requete.get("affecter"))
     cible = next((poste for poste in postes if poste["id"] == modifier_id), None)
     personnes = conn.execute(
@@ -652,23 +741,7 @@ def _dialogues(ctx, conn, postes, membres):
         cible_aff = postes[0]
     noms_entites = {poste["id"]: poste["nom"] for poste in postes}
     affectation = _dialogue_affectation(ctx, cible_aff, personnes, noms_entites, retour, choix_personnes)
-    retire = next((poste for poste in postes if poste["id"] == retirer_id and not poste["noeud_id"]), None)
-    confirmation = ""
-    if retire is not None:
-        confirmation = (
-            f'<div class="voile" id="retirer-entite" hidden><form class="dialogue" method="post" '
-            f'action="/organigramme/{int(retire["id"])}/retirer">'
-            f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
-            f"<h2>Supprimer « {echapper(retire['nom'])} » ?</h2>"
-            "<p>La suppression échouera si des sous-entités, des agents ou des documents y sont rattachés.</p>"
-            f"{jeton_cache(ctx)}"
-            f'<input type="hidden" name="retour" value="{echapper(retour)}">'
-            '<p class="pied-dialogue"><a class="bouton secondaire" href="'
-            f'{echapper(retour)}">Annuler</a>'
-            '<button type="submit" class="danger">Supprimer</button></p>'
-            "</form></div>"
-        )
-    return creation + edition + affectation + confirmation
+    return creation + edition + affectation
 
 
 def _dialogue_affectation(ctx, cible, personnes, noms_entites, retour, choix_personnes):
