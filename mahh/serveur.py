@@ -9,18 +9,34 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
+from mahh.carte import page_carte
+from mahh.exports import export_projets
 from mahh.accueil import (
     accueil,
     action_connexion,
     action_deconnexion,
     page_connexion,
-    page_eau,
+)
+from mahh.eau import (
+    action_abonner,
+    action_demande,
+    action_lieu,
+    action_payer as action_payer_eau,
+    page_abonnement as page_abonnement_eau,
+    page_demande,
+    page_demande_fiche,
+    page_module as page_eau,
+    page_prevu as page_prevu_eau,
+    page_seg,
+    page_snape,
 )
 from mahh.ordures import (
     action_abonnement,
     action_chercher,
+    action_localite,
     action_passage,
     action_payer,
+    action_pme,
     action_signalement,
     action_suivi,
     page_abonnement,
@@ -43,11 +59,21 @@ from mahh.administration import (
     page_compte,
     page_groupe,
     page_groupes,
+    page_nouvel_agent,
     page_utilisateurs,
 )
 from mahh.config import hote, port
 from mahh.db import preparer
-from mahh.instructions import action_instruction, action_sommation, page_instructions
+from mahh.indicateurs import action_ztt
+from mahh.instructions import (
+    action_executer,
+    action_instruction,
+    action_rouvrir,
+    page_instructions,
+    page_une_instruction,
+)
+from mahh.journal import page_journal
+from mahh.site_public import page_publique
 from mahh.documents import (
     action_dossier,
     action_fichier,
@@ -57,6 +83,19 @@ from mahh.documents import (
     page_noeud,
     telecharger,
 )
+from mahh.organigramme import (
+    action_affecter,
+    action_affecter_liste,
+    page_organigramme,
+    action_creer_attribution,
+    action_creer_poste,
+    action_detacher,
+    action_desaffecter,
+    action_modifier_attribution,
+    action_modifier_poste,
+    action_retirer_attribution,
+    action_retirer_poste,
+)
 from mahh.presentation import lire_avis, page_message
 from mahh.reponse import Html, Interdit, NonConnecte, Octets, Redirection
 from mahh.securite import (
@@ -65,6 +104,12 @@ from mahh.securite import (
     jeton_valide,
     nouveau_jeton,
     utilisateur_par_jeton,
+)
+from mahh.vitrine import (
+    action_creer as action_bloc,
+    action_modifier as action_bloc_modifier,
+    action_retirer as action_bloc_retirer,
+    page_edition,
 )
 from mahh.tableau import (
     action_modifier,
@@ -87,6 +132,7 @@ class Demande:
         self.chemin = "/"
         self.requete = {}
         self.formulaire = {}
+        self.listes = {}
         self.fichier = None
         self.utilisateur = None
         self.jeton = ""
@@ -97,10 +143,25 @@ class Demande:
 
 ROUTES = (
     ("GET", re.compile(r"^/$"), accueil),
+    ("GET", re.compile(r"^/communication$"), page_edition),
+    ("POST", re.compile(r"^/communication$"), action_bloc),
+    ("POST", re.compile(r"^/communication/(\d+)$"), action_bloc_modifier),
+    ("POST", re.compile(r"^/communication/(\d+)/retirer$"), action_bloc_retirer),
     ("GET", re.compile(r"^/connexion$"), page_connexion),
     ("POST", re.compile(r"^/connexion$"), action_connexion),
     ("POST", re.compile(r"^/deconnexion$"), action_deconnexion),
     ("GET", re.compile(r"^/directions$"), page_directions),
+    ("GET", re.compile(r"^/organigramme$"), page_organigramme),
+    ("POST", re.compile(r"^/organigramme$"), action_creer_poste),
+    ("POST", re.compile(r"^/organigramme/affecter$"), action_affecter_liste),
+    ("POST", re.compile(r"^/organigramme/(\d+)$"), action_modifier_poste),
+    ("POST", re.compile(r"^/organigramme/(\d+)/retirer$"), action_retirer_poste),
+    ("POST", re.compile(r"^/organigramme/(\d+)/detacher$"), action_detacher),
+    ("POST", re.compile(r"^/organigramme/(\d+)/affecter$"), action_affecter),
+    ("POST", re.compile(r"^/organigramme/(\d+)/desaffecter$"), action_desaffecter),
+    ("POST", re.compile(r"^/attribution$"), action_creer_attribution),
+    ("POST", re.compile(r"^/attribution/(\d+)$"), action_modifier_attribution),
+    ("POST", re.compile(r"^/attribution/(\d+)/retirer$"), action_retirer_attribution),
     ("GET", re.compile(r"^/noeud/(\d+)$"), page_noeud),
     ("POST", re.compile(r"^/noeud/(\d+)/dossier$"), action_dossier),
     ("POST", re.compile(r"^/noeud/(\d+)/fichier$"), action_fichier),
@@ -114,6 +175,8 @@ ROUTES = (
     ("POST", re.compile(r"^/groupes/(\d+)/retirer$"), action_retirer),
     ("POST", re.compile(r"^/groupes/(\d+)/droit$"), action_droit),
     ("POST", re.compile(r"^/groupes/(\d+)/bsd$"), action_bsd),
+    ("GET", re.compile(r"^/annuaire/nouveau$"), page_nouvel_agent),
+    ("GET", re.compile(r"^/annuaire$"), page_utilisateurs),
     ("GET", re.compile(r"^/utilisateurs$"), page_utilisateurs),
     ("POST", re.compile(r"^/utilisateurs$"), action_utilisateur),
     ("POST", re.compile(r"^/utilisateurs/(\d+)/desactiver$"), action_desactiver),
@@ -127,17 +190,26 @@ ROUTES = (
     ("POST", re.compile(r"^/bsd/projet/(\d+)/rattacher$"), action_rattacher),
     ("GET", re.compile(r"^/piece/(\d+)$"), telecharger_piece),
     ("GET", re.compile(r"^/instructions$"), page_instructions),
+    ("GET", re.compile(r"^/instructions/(\d+)$"), page_une_instruction),
     ("POST", re.compile(r"^/instructions$"), action_instruction),
-    ("POST", re.compile(r"^/instructions/sommation$"), action_sommation),
+    ("POST", re.compile(r"^/instructions/(\d+)/executer$"), action_executer),
+    ("POST", re.compile(r"^/instructions/(\d+)/rouvrir$"), action_rouvrir),
+    ("GET", re.compile(r"^/carte$"), page_carte),
+    ("GET", re.compile(r"^/journal$"), page_journal),
+    ("GET", re.compile(r"^/bsd/export\.csv$"), export_projets),
+    ("GET", re.compile(r"^/p/([a-z0-9-]+)$"), page_publique),
     ("GET", re.compile(r"^/bsd/projet/(\d+)/modifier$"), page_modifier),
     ("POST", re.compile(r"^/bsd/projet/(\d+)/modifier$"), action_modifier),
     ("POST", re.compile(r"^/bsd/projet/(\d+)/supprimer$"), action_supprimer_projet),
     ("GET", re.compile(r"^/ordures$"), page_module),
     ("GET", re.compile(r"^/ordures/abonnement$"), page_abonnement),
     ("POST", re.compile(r"^/ordures/abonnement$"), action_abonnement),
+    ("POST", re.compile(r"^/ordures/localite$"), action_localite),
+    ("POST", re.compile(r"^/ordures/ztt$"), action_ztt),
     ("POST", re.compile(r"^/ordures/chercher$"), action_chercher),
     ("GET", re.compile(r"^/ordures/pme$"), page_pme),
     ("POST", re.compile(r"^/ordures/pme$"), action_suivi),
+    ("POST", re.compile(r"^/ordures/pme/enregistrer$"), action_pme),
     ("GET", re.compile(r"^/ordures/points$"), page_points),
     ("GET", re.compile(r"^/ordures/abonnes$"), page_abonnes),
     ("GET", re.compile(r"^/ordures/a/([A-Za-z0-9-]+)$"), page_fiche),
@@ -145,7 +217,17 @@ ROUTES = (
     ("POST", re.compile(r"^/ordures/a/([A-Za-z0-9-]+)/signalement$"), action_signalement),
     ("POST", re.compile(r"^/ordures/a/([A-Za-z0-9-]+)/passage$"), action_passage),
     ("GET", re.compile(r"^/prevu/ordures$"), page_prevu),
-    ("GET", re.compile(r"^/prevu/eau$"), page_eau),
+    ("GET", re.compile(r"^/eau$"), page_eau),
+    ("GET", re.compile(r"^/eau/demande$"), page_demande),
+    ("POST", re.compile(r"^/eau/demande$"), action_demande),
+    ("POST", re.compile(r"^/eau/lieu$"), action_lieu),
+    ("GET", re.compile(r"^/eau/d/([A-Za-z0-9-]+)$"), page_demande_fiche),
+    ("POST", re.compile(r"^/eau/d/([A-Za-z0-9-]+)/abonner$"), action_abonner),
+    ("GET", re.compile(r"^/eau/a/([A-Za-z0-9-]+)$"), page_abonnement_eau),
+    ("POST", re.compile(r"^/eau/a/([A-Za-z0-9-]+)/payer$"), action_payer_eau),
+    ("GET", re.compile(r"^/eau/seg$"), page_seg),
+    ("GET", re.compile(r"^/eau/snape$"), page_snape),
+    ("GET", re.compile(r"^/prevu/eau$"), page_prevu_eau),
     ("GET", re.compile(r"^/statique/style\.css$"), None),
     ("GET", re.compile(r"^/favicon\.ico$"), None),
 )
@@ -197,13 +279,17 @@ class Gestionnaire(BaseHTTPRequestHandler):
             fichier = Path(__file__).resolve().parent / "statique" / "style.css"
             self._envoyer(Octets(fichier.read_bytes(), "text/css; charset=utf-8"), ctx.cookies)
             return
+        if chemin == "/statique/outils.js" and self.command == "GET":
+            fichier = Path(__file__).resolve().parent / "statique" / "outils.js"
+            self._envoyer(Octets(fichier.read_bytes(), "text/javascript; charset=utf-8"), ctx.cookies)
+            return
         if chemin == "/favicon.ico" and self.command == "GET":
             self._envoyer(Octets(b"", "image/x-icon", statut=204), ctx.cookies)
             return
 
         if self.command == "POST":
             try:
-                ctx.formulaire, ctx.fichier = _lire_corps(self)
+                ctx.formulaire, ctx.fichier, ctx.listes = _lire_corps(self)
             except ValueError:
                 self._envoyer(
                     page_message(ctx, "Demande refusée", "Le formulaire n’a pas pu être lu.", 400),
@@ -227,6 +313,14 @@ class Gestionnaire(BaseHTTPRequestHandler):
         with base() as conn:
             ctx.utilisateur = utilisateur_par_jeton(conn, cookies.get("mahh_session"))
 
+        if ctx.utilisateur is None and not _sans_session(self.command, chemin):
+            suivant = chemin + (("?" + analyse.query) if analyse.query else "")
+            self._envoyer(
+                Redirection("/connexion?suivant=" + _chemin_suivant(suivant)),
+                ctx.cookies,
+            )
+            return
+
         resultat = None
         try:
             for methode, motif, fonction in ROUTES:
@@ -242,6 +336,13 @@ class Gestionnaire(BaseHTTPRequestHandler):
             resultat = Redirection("/connexion?suivant=" + _chemin_suivant(exc.chemin))
         except Interdit as exc:
             resultat = page_message(ctx, "Accès refusé", exc.message, 403)
+        if self.command == "POST" and isinstance(resultat, Redirection) and ctx.utilisateur is not None:
+            try:
+                from mahh.journal import consigner
+
+                consigner(ctx.utilisateur["id"], chemin)
+            except Exception:
+                traceback.print_exc()
         self._envoyer(resultat, ctx.cookies)
 
     def _envoyer(self, resultat, cookies):
@@ -296,6 +397,17 @@ def _cookies(en_tete):
     return {cle: morsel.value for cle, morsel in pot.items()}
 
 
+def _sans_session(methode, chemin):
+    if (methode, chemin) in {
+        ("GET", "/"),
+        ("GET", "/connexion"),
+        ("POST", "/connexion"),
+        ("POST", "/deconnexion"),
+    }:
+        return True
+    return methode == "GET" and re.fullmatch(r"/p/[a-z0-9-]+", chemin) is not None
+
+
 def _chemin_suivant(chemin):
     from urllib.parse import quote
 
@@ -310,17 +422,21 @@ def _lire_corps(handler):
         longueur = int(brut)
     except ValueError as exc:
         raise ValueError("longueur") from exc
-    if longueur < 0 or longueur > 16 * 1024 * 1024:
+    if longueur < 0 or longueur > 110 * 1024 * 1024:
         raise ValueError("taille")
     corps = handler.rfile.read(longueur) if longueur else b""
     type_contenu = handler.headers.get("Content-Type", "")
     if type_contenu.startswith("application/x-www-form-urlencoded"):
         couples = parse_qs(corps.decode("utf-8", errors="replace"), keep_blank_values=True)
-        return {cle: valeurs[0] for cle, valeurs in couples.items()}, None
+        return (
+            {cle: valeurs[0] for cle, valeurs in couples.items()},
+            None,
+            {cle: valeurs for cle, valeurs in couples.items()},
+        )
     if type_contenu.startswith("multipart/form-data"):
         return _multipart(type_contenu, corps)
     if longueur == 0:
-        return {}, None
+        return {}, None, {}
     raise ValueError("type")
 
 
@@ -354,7 +470,7 @@ def _multipart(type_contenu, corps):
             fichier = (nom_fichier, contenu)
         else:
             champs[nom] = contenu.decode("utf-8", errors="replace")
-    return champs, fichier
+    return champs, fichier, {cle: [valeur] for cle, valeur in champs.items()}
 
 
 def _frontiere(type_contenu):

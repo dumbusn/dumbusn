@@ -1,7 +1,15 @@
 """Comptes, groupes et privilèges. Réservé à l'administrateur, sauf le changement de mot de passe."""
 
 from mahh.db import base
-from mahh.droits import FONCTIONS, exiger_admin, exiger_connexion
+from mahh.droits import (
+    FONCTION_COMMUNICATION,
+    FONCTIONS,
+    NIVEAUX,
+    NIVEAUX_DIRECTION,
+    exiger_admin,
+    exiger_connexion,
+    exiger_organigramme,
+)
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Redirection, ValeurRefusee
 from mahh.securite import (
@@ -274,97 +282,258 @@ def action_bsd(ctx, groupe_id):
 
 
 def page_utilisateurs(ctx, erreur=None):
-    exiger_admin(ctx)
+    exiger_organigramme(ctx)
+    recherche = (ctx.requete.get("q") or "").strip().lower()
     with base() as conn:
-        personnes = conn.execute("SELECT * FROM utilisateur ORDER BY nom").fetchall()
-        structures = conn.execute(
-            "SELECT id, nom FROM noeud WHERE genre = 'structure' ORDER BY nom"
+        personnes = conn.execute(
+            "SELECT * FROM utilisateur WHERE actif = 1 ORDER BY nom, identifiant"
         ).fetchall()
-        lignes = []
-        for personne in personnes:
-            role = _role(personne)
-            etat = "actif" if personne["actif"] else "désactivé"
-            action = ""
-            if personne["actif"] and personne["id"] != ctx.utilisateur["id"]:
-                action = (
-                    f'<form method="post" action="/utilisateurs/{int(personne["id"])}/desactiver">'
-                    f'{jeton_cache(ctx)}<button type="submit" class="secondaire">Désactiver</button></form>'
+        entites = conn.execute(
+            "SELECT id, code, nom, niveau FROM organigramme ORDER BY ordre, nom"
+        ).fetchall()
+    if recherche:
+        personnes = [
+            personne for personne in personnes
+            if recherche in " ".join(
+                (
+                    personne["nom"],
+                    personne["identifiant"],
+                    personne["courriel"] or "",
+                    personne["matricule"] or "",
+                    personne["intitule_poste"] or "",
                 )
-            lignes.append(
-                f'<tr data-identifiant="{echapper(personne["identifiant"])}">'
-                f'<td>{echapper(personne["nom"])}</td>'
-                f'<td>{echapper(personne["identifiant"])}</td>'
-                f"<td>{role}</td><td>{etat}</td><td>{action}</td></tr>"
+            ).lower()
+        ]
+    par_entite = {int(entite["id"]): entite for entite in entites}
+    lignes = []
+    for personne in personnes:
+        entite = par_entite.get(personne["organigramme_id"] or 0)
+        departement = ""
+        if entite is not None:
+            departement = entite["code"] or entite["nom"]
+        badges = "".join(
+            f'<span class="pastille">{echapper(_libelle_role(role))}</span>'
+            for role in _roles_personne(personne)
+        )
+        courriel = (
+            f'<span class="meta-agent">{echapper(personne["courriel"])}</span>'
+            if personne["courriel"]
+            else ""
+        )
+        matricule = (
+            f'<span class="meta-agent">{echapper(personne["matricule"])}</span>'
+            if personne["matricule"]
+            else ""
+        )
+        retrait = ""
+        if personne["id"] != ctx.utilisateur["id"]:
+            retrait = (
+                f'<form method="post" action="/utilisateurs/{int(personne["id"])}/desactiver">'
+                f'{jeton_cache(ctx)}<button type="submit" class="icone" title="Retirer">Retirer</button></form>'
             )
+        lignes.append(
+            f'<tr data-identifiant="{echapper(personne["identifiant"])}">'
+            f'<td><strong>{echapper(personne["nom"])}</strong>{courriel}{matricule}</td>'
+            f'<td>{echapper(personne["intitule_poste"] or "")}</td>'
+            f'<td>{echapper(departement)}</td>'
+            f'<td class="roles">{badges}</td>'
+            f'<td class="actions-table">{retrait}</td></tr>'
+        )
+    vide = '<tr><td colspan="5">Aucun agent pour cette recherche.</td></tr>' if not lignes else ""
     corps = (
-        "<h1>Utilisateurs</h1>"
-        "<table><caption>Comptes</caption><thead><tr>"
-        "<th>Nom</th><th>Identifiant</th><th>Rôle</th><th>État</th><th></th>"
+        '<header class="org-entete">'
+        "<div>"
+        '<p class="sur-titre">Administration</p>'
+        "<h1>Annuaire</h1>"
+        '<p class="chapeau">Les agents du ministère, leur entité et leurs rôles. '
+        "Chaque personne ne voit que ce que son rôle autorise.</p>"
+        "</div>"
+        '<a class="bouton" href="/annuaire/nouveau">+ Nouvel agent</a>'
+        "</header>"
+        f'<p class="compteur-page">{len(personnes)} agent{"s" if len(personnes) != 1 else ""}</p>'
+        '<section class="carte-arbre"><div class="barre-agents"><h2>Agents</h2>'
+        '<form method="get" action="/annuaire" class="recherche">'
+        '<label class="visually-hidden" for="q">Recherche</label>'
+        f'<input id="q" name="q" value="{echapper(recherche)}" '
+        'placeholder="Rechercher nom, e-mail, matricule, poste…">'
+        "</form></div>"
+        "<table><thead><tr>"
+        "<th>Agent</th><th>Poste</th><th>Département</th><th>Rôles</th><th>Actions</th>"
         "</tr></thead><tbody>"
-        + "".join(lignes)
-        + "</tbody></table>"
-        + '<form method="post" action="/utilisateurs" class="formulaire">'
-        + jeton_cache(ctx)
-        + '<label for="identifiant">Identifiant</label>'
-        + '<input id="identifiant" name="identifiant" maxlength="40" required autocomplete="off">'
-        + '<label for="nom">Nom affiché</label>'
-        + '<input id="nom" name="nom" maxlength="80" required>'
-        + '<label for="mot">Mot de passe initial</label>'
-        + '<input id="mot" name="mot_de_passe" type="password" required autocomplete="new-password">'
-        + '<label class="case"><input type="checkbox" name="administrateur"> Administrateur</label>'
-        + '<label for="fonction">Fonction</label>'
-        + '<select id="fonction" name="fonction">'
-        + '<option value="">Aucune fonction de hiérarchie</option>'
-        + "".join(
-            f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in FONCTIONS.items()
-        )
-        + "</select>"
-        + '<label for="structure">Rattachement</label>'
-        + '<select id="structure" name="structure_id">'
-        + '<option value="">Aucun rattachement</option>'
-        + "".join(
-            f'<option value="{int(structure["id"])}">{echapper(structure["nom"])}</option>'
-            for structure in structures
-        )
-        + "</select>"
-        + '<p class="aide">Une fonction de hiérarchie ouvre tout le ministère. '
-        "Sans cette fonction, le rattachement limite le compte à une direction ou un service.</p>"
-        + '<button type="submit">Créer le compte</button></form>'
+        + ("".join(lignes) or vide)
+        + "</tbody></table></section>"
     )
-    return page("Utilisateurs", corps, ctx, actif="utilisateurs", erreur=erreur)
+    return page("Annuaire", corps, ctx, actif="annuaire", erreur=erreur)
+
+
+def page_nouvel_agent(ctx, erreur=None):
+    exiger_organigramme(ctx)
+    with base() as conn:
+        entites = conn.execute(
+            "SELECT id, code, nom FROM organigramme ORDER BY ordre, nom"
+        ).fetchall()
+    return page("Nouvel agent", _fiche_agent(ctx, entites), ctx, actif="nouvel-agent", erreur=erreur)
+
+
+def _fiche_agent(ctx, entites):
+    options_entites = ['<option value="">— Non affecté —</option>']
+    for entite in entites:
+        marque = f'{entite["code"]} · ' if entite["code"] else ""
+        options_entites.append(
+            f'<option value="{int(entite["id"])}">{echapper(marque + entite["nom"])}</option>'
+        )
+    return (
+        '<header class="org-entete"><div>'
+        '<p class="sur-titre">Administration</p>'
+        "<h1>Nouvel agent</h1>"
+        '<p class="chapeau">Création du compte. Le rattachement à une entité est facultatif.</p>'
+        "</div></header>"
+        '<form class="formulaire fiche-agent" method="post" action="/utilisateurs">'
+        + jeton_cache(ctx)
+        + '<div class="champ"><label for="nom">Nom complet *</label>'
+        + '<input id="nom" name="nom" maxlength="80" required autocomplete="name"></div>'
+        + '<div class="champ"><label for="courriel">E-mail professionnel</label>'
+        + '<input id="courriel" name="courriel" type="email" maxlength="120" autocomplete="off"></div>'
+        + '<div class="champ"><label for="identifiant">Identifiant de connexion *</label>'
+        + '<input id="identifiant" name="identifiant" maxlength="40" required autocomplete="off"></div>'
+        + '<div class="champ"><label for="mot">Mot de passe temporaire *</label>'
+        + '<div class="mot-ligne">'
+        + '<input id="mot" name="mot_de_passe" type="text" required autocomplete="new-password">'
+        + '<button type="button" class="secondaire" data-regenerer="mot">Régénérer</button>'
+        + "</div></div>"
+        + '<div class="champ"><label for="matricule">Matricule</label>'
+        + '<input id="matricule" name="matricule" maxlength="40" autocomplete="off"></div>'
+        + '<div class="champ"><label for="poste">Poste</label>'
+        + '<input id="poste" name="intitule_poste" maxlength="120"></div>'
+        + '<div class="champ"><label for="telephone">Téléphone professionnel</label>'
+        + '<input id="telephone" name="telephone" maxlength="40" autocomplete="off"></div>'
+        + '<div class="champ"><label for="departement">Département / Service</label>'
+        + f'<select id="departement" name="organigramme_id">{"".join(options_entites)}</select></div>'
+        + '<div class="champ"><label for="niveau">Rôles</label>'
+        + '<select id="niveau" name="fonction" data-niveaux="1">'
+        + '<option value="">Ajouter un rôle…</option>'
+        + "".join(f'<option value="{cle}">{echapper(libelle)}</option>' for cle, libelle in NIVEAUX)
+        + '<option value="bsd">BSD</option>'
+        + '<option value="communication">Cellule de communication</option>'
+        + "</select></div>"
+        + '<label class="case"><input type="checkbox" name="administrateur"> Administrateur de l’application</label>'
+        + '<p class="pied-dialogue"><a class="bouton secondaire" href="/annuaire">Annuler</a>'
+        + '<button type="submit">Créer le compte</button></p>'
+        + "</form>"
+    )
 
 
 def action_utilisateur(ctx):
-    exiger_admin(ctx)
+    exiger_organigramme(ctx)
     try:
         ident = valider_identifiant(ctx.formulaire.get("identifiant"))
         nom = ligne(ctx.formulaire.get("nom"), 2, 80, "Nom affiché")
         mot = mot_de_passe(ctx.formulaire.get("mot_de_passe"))
     except ValeurRefusee as exc:
-        return page_utilisateurs(ctx, erreur=exc.message)
+        return page_nouvel_agent(ctx, erreur=exc.message)
     admin = 1 if ctx.formulaire.get("administrateur") is not None else 0
     fonction = (ctx.formulaire.get("fonction") or "").strip()
-    if fonction not in FONCTIONS and fonction != "":
-        return page_utilisateurs(ctx, erreur="Cette fonction n’est pas reconnue.")
+    if fonction not in FONCTIONS and fonction not in ("", FONCTION_COMMUNICATION):
+        return page_nouvel_agent(ctx, erreur="Ce niveau n’est pas reconnu.")
+    roles = fonction
     with base() as conn:
         if conn.execute(
             "SELECT id FROM utilisateur WHERE lower(identifiant) = lower(?)", (ident,)
         ).fetchone():
-            return page_utilisateurs(ctx, erreur="Cet identifiant est déjà utilisé.")
-        structure_id = None
-        if not fonction:
-            structure_id = _structure_compte(conn, ctx.formulaire)
-            if structure_id == "invalide":
-                return page_utilisateurs(ctx, erreur="La structure n’est pas dans l’arbre.")
+            return page_nouvel_agent(ctx, erreur="Cet identifiant est déjà utilisé.")
+        structure_id = _structure_compte(conn, ctx.formulaire)
+        if structure_id == "invalide":
+            return page_nouvel_agent(ctx, erreur="La direction n’est pas dans l’arbre.")
+        organigramme_id = _entite_compte(conn, ctx.formulaire)
+        if organigramme_id == "invalide":
+            return page_nouvel_agent(ctx, erreur="Cette entité n’est pas dans l’organigramme.")
+        if organigramme_id and not structure_id:
+            from mahh.organigramme import _poste, _structure_du_poste
+
+            poste = _poste(conn, organigramme_id)
+            if poste is not None:
+                structure_id = _structure_du_poste(conn, poste)
+                if not fonction and poste["niveau"]:
+                    fonction = poste["niveau"]
+                    roles = fonction
+        if fonction in NIVEAUX_DIRECTION and not structure_id:
+            return page_nouvel_agent(ctx, erreur="Choisissez la direction rattachée.")
+        courriel = (ctx.formulaire.get("courriel") or "").strip()
+        if courriel and ("@" not in courriel or len(courriel) > 120):
+            return page_nouvel_agent(ctx, erreur="L’adresse électronique n’est pas recevable.")
+        matricule = (ctx.formulaire.get("matricule") or "").strip()[:40]
+        telephone = (ctx.formulaire.get("telephone") or "").strip()[:40]
+        intitule = (ctx.formulaire.get("intitule_poste") or "").strip()[:120]
         conn.execute(
             """
             INSERT INTO utilisateur (
-                identifiant, nom, mot_de_passe, administrateur, fonction, structure_id, actif, cree_le
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                identifiant, nom, mot_de_passe, administrateur, fonction, structure_id,
+                courriel, organigramme_id, matricule, telephone, intitule_poste, roles,
+                actif, cree_le
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             """,
-            (ident, nom, hasher(mot), admin, fonction, structure_id, maintenant()),
+            (
+                ident, nom, hasher(mot), admin, fonction, structure_id, courriel,
+                organigramme_id, matricule, telephone, intitule, roles, maintenant(),
+            ),
         )
-    return Redirection("/utilisateurs?message=utilisateur-cree")
+    return Redirection("/annuaire?message=utilisateur-cree")
+
+
+def _options_directions(structures):
+    groupes = []
+    domaine = None
+    options = []
+
+    def fermer():
+        if domaine is not None:
+            groupes.append(
+                f'<optgroup label="{echapper(domaine)}">{"".join(options)}</optgroup>'
+            )
+
+    for structure in structures:
+        if structure["domaine"] != domaine:
+            fermer()
+            domaine = structure["domaine"]
+            options = []
+        complement = f" — {structure['intitule']}" if structure["intitule"] else ""
+        options.append(
+            f'<option value="{int(structure["id"])}">'
+            f'{echapper(structure["nom"] + complement)}</option>'
+        )
+    fermer()
+    return "".join(groupes)
+
+
+def _entite_compte(conn, formulaire):
+    brut = (formulaire.get("organigramme_id") or "").strip()
+    if not brut:
+        return None
+    try:
+        identifiant = int(brut)
+    except ValueError:
+        return "invalide"
+    if conn.execute("SELECT id FROM organigramme WHERE id = ?", (identifiant,)).fetchone() is None:
+        return "invalide"
+    return identifiant
+
+
+def _roles_personne(personne):
+    roles = []
+    if personne["fonction"]:
+        roles.append(personne["fonction"])
+    for role in (personne["roles"] or "").split():
+        if role not in roles:
+            roles.append(role)
+    return roles
+
+
+def _libelle_role(role):
+    if role in FONCTIONS:
+        return FONCTIONS[role]
+    if role == FONCTION_COMMUNICATION:
+        return "Cellule de communication"
+    return role
 
 
 def _role(personne):
@@ -373,6 +542,8 @@ def _role(personne):
         morceaux.append("administrateur")
     if personne["fonction"] in FONCTIONS:
         morceaux.append(FONCTIONS[personne["fonction"]])
+    elif personne["fonction"] == FONCTION_COMMUNICATION:
+        morceaux.append("cellule de communication")
     elif personne["structure_id"]:
         morceaux.append("direction ou service")
     return ", ".join(morceaux) if morceaux else "compte"

@@ -1,7 +1,10 @@
-"""Page d’instructions, destinée aux écrans du ministère. Pas un texte juridique."""
+"""Instructions du ministère. Chaque niveau n’instruit que le niveau juste en dessous."""
 
+from datetime import date, timedelta
+
+from mahh.courriel import envoyer, lien_instruction
 from mahh.db import base
-from mahh.droits import FONCTIONS, est_hierarchie, exiger_connexion
+from mahh.droits import FONCTIONS, est_hierarchie, exiger_connexion, peut_voir_instructions
 from mahh.presentation import jeton_cache, page
 from mahh.reponse import Interdit, Redirection, ValeurRefusee
 from mahh.securite import maintenant
@@ -9,193 +12,339 @@ from mahh.tableau import _filtrer
 from mahh.texte import echapper, fmt_date
 from mahh.validation import bloc
 
-CIRCUIT = (
-    ("ministre", "Ministre", "Écrit à l’attention du chef de cabinet."),
-    ("chef_cabinet", "Chef de cabinet", "Écrit à l’attention du secrétaire général."),
-    ("secretaire_general", "Secrétaire général", "Écrit à l’attention d’une direction ou d’un service."),
-    ("directions", "Directions et services", "Reçoivent l’instruction et le suivi."),
+# Le chargé d’études reçoit. Il n’instruit pas en dessous.
+CHAINE = (
+    "ministre",
+    "secretaire_general",
+    "chef_cabinet",
+    "directeur",
+    "directeur_adjoint",
+    "chef_division",
+    "chef_section",
+    "charge_etudes",
 )
-ECRITURE = {
-    "ministre": "ministre",
-    "chef_cabinet": "chef_cabinet",
-    "secretaire_general": "secretaire_general",
+SUIVANT = {niveau: CHAINE[index + 1] for index, niveau in enumerate(CHAINE[:-1])}
+MINISTERE = ("ministre", "secretaire_general", "chef_cabinet")
+PHRASES = {
+    "ministre": "Instruit le secrétaire général, et seulement lui.",
+    "secretaire_general": "Instruit le chef de cabinet, et seulement lui.",
+    "chef_cabinet": "Instruit les directeurs, et seulement eux.",
+    "directeur": "Instruit les directeurs adjoints de sa direction.",
+    "directeur_adjoint": "Instruit les chefs de division de sa direction.",
+    "chef_division": "Instruit les chefs de section de sa direction.",
+    "chef_section": "Instruit les chargés d’études de sa direction.",
+    "charge_etudes": "Reçoit l’instruction. N’instruit pas en dessous.",
 }
 
 
 def page_instructions(ctx, erreur=None):
     exiger_connexion(ctx)
+    if not peut_voir_instructions(ctx.utilisateur):
+        raise Interdit("Les instructions concernent la chaîne du ministère et les directions.")
     with base() as conn:
         instructions = _instructions_visibles(conn, ctx.utilisateur)
-        sommations = _sommations_visibles(conn, ctx.utilisateur)
         retards = [
             projet
             for projet in _filtrer(conn, ctx.utilisateur, "", "", "")
             if projet["statut"] == "En retard"
         ]
-        structures = conn.execute(
-            "SELECT id, nom FROM noeud WHERE genre = 'structure' ORDER BY nom"
-        ).fetchall()
-        corps = _corps(ctx, instructions, sommations, retards, structures)
+        corps = _corps(ctx, conn, instructions, retards)
     return page("Instructions", corps, ctx, actif="instructions", erreur=erreur)
+
+
+def page_une_instruction(ctx, identifiant):
+    exiger_connexion(ctx)
+    with base() as conn:
+        instruction = _instruction_visible(conn, ctx.utilisateur, identifiant)
+        if instruction is None:
+            raise Interdit("Cette instruction ne vous est pas destinée.")
+        destinataires = _destinataires(conn, instruction["id"])
+        corps = _article(ctx, instruction, destinataires, seule=True)
+    return page("Instruction", "<h1>Instruction</h1>" + corps, ctx, actif="instructions")
 
 
 def action_instruction(ctx):
     exiger_connexion(ctx)
-    echelon = (ctx.formulaire.get("echelon") or "").strip()
-    if not _peut_ecrire(ctx.utilisateur, echelon):
-        raise Interdit("Cet échelon n’écrit pas depuis votre compte.")
+    niveau = (ctx.utilisateur["fonction"] or "")
+    cible = SUIVANT.get(niveau)
+    if cible is None:
+        raise Interdit("Ce compte ne transmet pas d’instruction à un niveau inférieur.")
     try:
         texte = bloc(ctx.formulaire.get("texte"), 2, 2000, "Instruction")
     except ValeurRefusee as exc:
         return page_instructions(ctx, erreur=exc.message)
+    echeance = _date(ctx.formulaire.get("echeance"))
+    if echeance is False:
+        return page_instructions(ctx, erreur="L’échéance n’est pas une date valide.")
+    demandes = _plusieurs(ctx, "destinataire")
     with base() as conn:
-        structure_id = None
-        if echelon == "secretaire_general":
-            structure_id = _structure(conn, ctx.formulaire)
-            if structure_id is None:
-                return page_instructions(
-                    ctx, erreur="Le secrétaire général désigne une direction ou un service."
-                )
-        conn.execute(
+        possibles = {personne["id"]: personne for personne in _possibles(conn, ctx.utilisateur, cible)}
+        choisis = []
+        for brut in demandes:
+            try:
+                identifiant = int(brut)
+            except ValueError:
+                continue
+            if identifiant in possibles:
+                choisis.append(possibles[identifiant])
+        if not choisis:
+            return page_instructions(ctx, erreur="Choisissez au moins un destinataire du niveau juste en dessous.")
+        structure_id = _structure_instruction(ctx.utilisateur, choisis)
+        curseur = conn.execute(
             """
-            INSERT INTO instruction (echelon, structure_id, texte, cree_par, cree_le)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO instruction (
+                echelon, structure_id, texte, cree_par, cree_le, echeance
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (echelon, structure_id, texte, ctx.utilisateur["id"], maintenant()),
+            (niveau, structure_id, texte, ctx.utilisateur["id"], maintenant(), echeance or ""),
         )
-    return Redirection("/instructions?message=instruction-creee")
+        instruction_id = curseur.lastrowid
+        conn.executemany(
+            """
+            INSERT INTO instruction_destinataire (instruction_id, utilisateur_id)
+            VALUES (?, ?)
+            """,
+            [(instruction_id, personne["id"]) for personne in choisis],
+        )
+        adresses = [personne["courriel"] for personne in choisis]
+        lien = lien_instruction(instruction_id)
+    resultat = envoyer(
+        adresses,
+        "Instruction du ministère",
+        (
+            f"{ctx.utilisateur['nom']} vous adresse une instruction.\n\n"
+            f"{texte}\n\n"
+            "Ouvrez le lien, identifiez-vous, puis lisez l’instruction :\n"
+            f"{lien}\n"
+        ),
+    )
+    messages = {
+        "envoye": "instruction-envoyee",
+        "absent": "instruction-sans-courriel",
+        "sans-adresse": "instruction-sans-adresse",
+        "echec": "instruction-courriel-echec",
+    }
+    return Redirection("/instructions?message=" + messages.get(resultat, "instruction-sans-courriel"))
 
 
-def action_sommation(ctx):
+def action_executer(ctx, identifiant):
     exiger_connexion(ctx)
-    if not est_hierarchie(ctx.utilisateur):
-        raise Interdit("Sommer une direction est réservé à la hiérarchie et au BSD.")
-    try:
-        texte = bloc(ctx.formulaire.get("texte"), 2, 2000, "Sommation")
-    except ValeurRefusee as exc:
-        return page_instructions(ctx, erreur=exc.message)
+    compte_rendu = (ctx.formulaire.get("compte_rendu") or "").strip()[:2000]
     with base() as conn:
-        structure_id = _structure(conn, ctx.formulaire)
-        if structure_id is None:
-            return page_instructions(ctx, erreur="Indiquez la direction ou le service à sommer.")
-        projet_id = _projet(conn, ctx.formulaire, structure_id)
+        instruction = _instruction(conn, identifiant)
+        if not _est_destinataire_ouvert(conn, ctx.utilisateur, instruction["id"]):
+            raise Interdit("Seul le destinataire marque son retour.")
         conn.execute(
             """
-            INSERT INTO sommation (structure_id, projet_id, texte, cree_par, cree_le)
-            VALUES (?, ?, ?, ?, ?)
+            UPDATE instruction_destinataire
+            SET etat = 'executee', execute_le = ?, compte_rendu = ?
+            WHERE instruction_id = ? AND utilisateur_id = ?
             """,
-            (structure_id, projet_id, texte, ctx.utilisateur["id"], maintenant()),
+            (maintenant(), compte_rendu, instruction["id"], ctx.utilisateur["id"]),
         )
-    return Redirection("/instructions?message=sommation-creee")
+        reste = conn.execute(
+            """
+            SELECT 1 FROM instruction_destinataire
+            WHERE instruction_id = ? AND etat != 'executee'
+            """,
+            (instruction["id"],),
+        ).fetchone()
+        if reste is None:
+            conn.execute(
+                """
+                UPDATE instruction
+                SET etat = 'executee', execute_le = ?, execute_par = ?, compte_rendu = ?
+                WHERE id = ?
+                """,
+                (maintenant(), ctx.utilisateur["id"], compte_rendu, instruction["id"]),
+            )
+    return Redirection(f"/instructions/{int(identifiant)}?message=instruction-executee")
 
 
-def _peut_ecrire(utilisateur, echelon):
-    if echelon not in ECRITURE:
-        return False
-    if utilisateur["administrateur"]:
-        return True
-    return utilisateur["fonction"] == echelon
+def action_rouvrir(ctx, identifiant):
+    exiger_connexion(ctx)
+    with base() as conn:
+        instruction = _instruction(conn, identifiant)
+        if not (est_hierarchie(ctx.utilisateur) or instruction["cree_par"] == ctx.utilisateur["id"]):
+            raise Interdit("Seul l’auteur, ou la hiérarchie, rouvre l’instruction.")
+        conn.execute(
+            """
+            UPDATE instruction_destinataire
+            SET etat = 'en_cours', execute_le = NULL, compte_rendu = ''
+            WHERE instruction_id = ?
+            """,
+            (instruction["id"],),
+        )
+        conn.execute(
+            """
+            UPDATE instruction
+            SET etat = 'en_cours', execute_le = NULL, execute_par = NULL, compte_rendu = ''
+            WHERE id = ?
+            """,
+            (instruction["id"],),
+        )
+    return Redirection(f"/instructions/{int(identifiant)}?message=instruction-rouverte")
 
 
-def _structure(conn, formulaire):
-    brut = (formulaire.get("structure_id") or "").strip()
-    if not brut:
-        return None
-    try:
-        structure_id = int(brut)
-    except ValueError:
-        return None
-    ligne = conn.execute(
-        "SELECT id FROM noeud WHERE id = ? AND genre = 'structure'",
-        (structure_id,),
-    ).fetchone()
-    return structure_id if ligne else None
+def _plusieurs(ctx, cle):
+    valeurs = getattr(ctx, "listes", {}).get(cle)
+    if valeurs:
+        return [valeur for valeur in valeurs if str(valeur).strip()]
+    brut = (ctx.formulaire.get(cle) or "").strip()
+    return [brut] if brut else []
 
 
-def _projet(conn, formulaire, structure_id):
-    brut = (formulaire.get("projet_id") or "").strip()
-    if not brut:
-        return None
-    try:
-        projet_id = int(brut)
-    except ValueError:
-        return None
-    ligne = conn.execute(
-        "SELECT id, structure_id FROM projet WHERE id = ?",
-        (projet_id,),
-    ).fetchone()
-    if ligne is None or ligne["structure_id"] != structure_id:
-        return None
-    return projet_id
+def _structure_instruction(utilisateur, choisis):
+    if utilisateur["structure_id"]:
+        return utilisateur["structure_id"]
+    structures = {personne["structure_id"] for personne in choisis if personne["structure_id"]}
+    if len(structures) == 1:
+        return structures.pop()
+    return None
 
 
-def _instructions_visibles(conn, utilisateur):
-    if est_hierarchie(utilisateur):
+def _possibles(conn, utilisateur, cible):
+    if utilisateur["fonction"] in MINISTERE:
         return conn.execute(
             """
-            SELECT i.*, u.nom AS auteur, n.nom AS structure
-            FROM instruction i
-            LEFT JOIN utilisateur u ON u.id = i.cree_par
-            LEFT JOIN noeud n ON n.id = i.structure_id
-            ORDER BY i.cree_le DESC, i.id DESC
-            """
+            SELECT id, nom, courriel, structure_id FROM utilisateur
+            WHERE actif = 1 AND fonction = ?
+            ORDER BY nom
+            """,
+            (cible,),
         ).fetchall()
     if not utilisateur["structure_id"]:
         return []
     return conn.execute(
         """
-        SELECT i.*, u.nom AS auteur, n.nom AS structure
+        SELECT id, nom, courriel, structure_id FROM utilisateur
+        WHERE actif = 1 AND fonction = ? AND structure_id = ?
+        ORDER BY nom
+        """,
+        (cible, utilisateur["structure_id"]),
+    ).fetchall()
+
+
+def _instruction(conn, identifiant):
+    try:
+        identifiant = int(identifiant)
+    except (TypeError, ValueError):
+        raise Interdit("Cette instruction n’existe pas.")
+    ligne = conn.execute("SELECT * FROM instruction WHERE id = ?", (identifiant,)).fetchone()
+    if ligne is None:
+        raise Interdit("Cette instruction n’existe pas.")
+    return ligne
+
+
+def _instruction_visible(conn, utilisateur, identifiant):
+    try:
+        identifiant = int(identifiant)
+    except (TypeError, ValueError):
+        return None
+    visibles = {ligne["id"]: ligne for ligne in _instructions_visibles(conn, utilisateur)}
+    return visibles.get(identifiant)
+
+
+def _est_destinataire_ouvert(conn, utilisateur, instruction_id):
+    ligne = conn.execute(
+        """
+        SELECT etat FROM instruction_destinataire
+        WHERE instruction_id = ? AND utilisateur_id = ?
+        """,
+        (instruction_id, utilisateur["id"]),
+    ).fetchone()
+    return ligne is not None and ligne["etat"] != "executee"
+
+
+def _instructions_visibles(conn, utilisateur):
+    requete = """
+        SELECT DISTINCT i.*, u.nom AS auteur
         FROM instruction i
         LEFT JOIN utilisateur u ON u.id = i.cree_par
-        LEFT JOIN noeud n ON n.id = i.structure_id
-        WHERE i.echelon = 'secretaire_general' AND i.structure_id = ?
-        ORDER BY i.cree_le DESC, i.id DESC
-        """,
-        (utilisateur["structure_id"],),
-    ).fetchall()
-
-
-def _sommations_visibles(conn, utilisateur):
+        LEFT JOIN instruction_destinataire d ON d.instruction_id = i.id
+    """
     if est_hierarchie(utilisateur):
-        clause = ""
-        params = ()
-    elif utilisateur["structure_id"]:
-        clause = "WHERE s.structure_id = ?"
-        params = (utilisateur["structure_id"],)
-    else:
-        return []
+        requete += " ORDER BY i.cree_le DESC, i.id DESC"
+        return conn.execute(requete).fetchall()
+    if utilisateur["fonction"] == "directeur" and utilisateur["structure_id"]:
+        requete += """
+            WHERE i.cree_par = ? OR d.utilisateur_id = ? OR i.structure_id = ?
+            ORDER BY i.cree_le DESC, i.id DESC
+        """
+        return conn.execute(
+            requete,
+            (utilisateur["id"], utilisateur["id"], utilisateur["structure_id"]),
+        ).fetchall()
+    requete += """
+        WHERE i.cree_par = ? OR d.utilisateur_id = ?
+        ORDER BY i.cree_le DESC, i.id DESC
+    """
+    return conn.execute(requete, (utilisateur["id"], utilisateur["id"])).fetchall()
+
+
+def _destinataires(conn, instruction_id):
     return conn.execute(
-        f"""
-        SELECT s.*, u.nom AS auteur, n.nom AS structure, p.code AS code
-        FROM sommation s
-        LEFT JOIN utilisateur u ON u.id = s.cree_par
-        JOIN noeud n ON n.id = s.structure_id
-        LEFT JOIN projet p ON p.id = s.projet_id
-        {clause}
-        ORDER BY s.cree_le DESC, s.id DESC
+        """
+        SELECT d.*, u.nom, u.courriel
+        FROM instruction_destinataire d
+        JOIN utilisateur u ON u.id = d.utilisateur_id
+        WHERE d.instruction_id = ?
+        ORDER BY u.nom
         """,
-        params,
+        (instruction_id,),
     ).fetchall()
 
 
-def _corps(ctx, instructions, sommations, retards, structures):
+def en_retard(instruction, aujourd_hui):
+    return (
+        instruction["etat"] != "executee"
+        and bool(instruction["echeance"])
+        and instruction["echeance"] < aujourd_hui.isoformat()
+    )
+
+
+def bilan(instructions, aujourd_hui):
+    depuis = (aujourd_hui - timedelta(days=6)).isoformat()
+    return {
+        "semaine": sum(
+            1
+            for instruction in instructions
+            if instruction["etat"] == "executee" and (instruction["execute_le"] or "")[:10] >= depuis
+        ),
+        "en_cours": sum(1 for instruction in instructions if instruction["etat"] != "executee"),
+        "retard": sum(1 for instruction in instructions if en_retard(instruction, aujourd_hui)),
+    }
+
+
+def _date(brut):
+    brut = (brut or "").strip()
+    if not brut:
+        return None
+    try:
+        return date.fromisoformat(brut).isoformat()
+    except ValueError:
+        return False
+
+
+def _corps(ctx, conn, instructions, retards):
     etapes = []
-    for cle, libelle, phrase in CIRCUIT:
+    for niveau in CHAINE:
         etapes.append(
-            f'<li data-echelon="{cle}"><strong>{echapper(libelle)}</strong>'
-            f"<span>{echapper(phrase)}</span></li>"
+            f'<li data-echelon="{niveau}"><strong>{echapper(FONCTIONS[niveau])}</strong>'
+            f"<span>{echapper(PHRASES[niveau])}</span></li>"
         )
     return (
         '<section class="ecran">'
         "<p class=\"ecran-ministere\">Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures</p>"
         "<h1>Instructions</h1>"
-        "<p class=\"ecran-sous\">Du ministre aux directions. Page destinée aux écrans du ministère.</p>"
+        "<p class=\"ecran-sous\">Chaque niveau instruit seulement le niveau juste en dessous, "
+        "choisit ses destinataires et attend leur retour.</p>"
         f'<ol class="circuit">{"".join(etapes)}</ol>'
         "</section>"
+        + _bilan(bilan(instructions, ctx.aujourd_hui))
         + _retards(retards)
-        + _liste_instructions(instructions)
-        + _liste_sommations(sommations)
-        + _formulaires(ctx, structures, retards)
+        + _liste(ctx, conn, instructions)
+        + _formulaire(ctx, conn)
     )
 
 
@@ -212,96 +361,113 @@ def _retards(retards):
     return "<h2>Projets en retard</h2><ul>" + "".join(items) + "</ul>"
 
 
-def _liste_instructions(instructions):
+def _bilan(chiffres):
+    return (
+        '<div class="bilan">'
+        f'<div data-bilan="semaine"><strong>{chiffres["semaine"]}</strong> exécutées ces 7 derniers jours</div>'
+        f'<div data-bilan="en-cours"><strong>{chiffres["en_cours"]}</strong> en cours</div>'
+        f'<div data-bilan="retard"><strong>{chiffres["retard"]}</strong> échéance dépassée</div>'
+        "</div>"
+    )
+
+
+def _liste(ctx, conn, instructions):
     if not instructions:
-        return "<h2>Instructions publiées</h2><p>Aucune instruction dans votre vue.</p>"
-    items = []
+        return "<h2>Instructions</h2><p>Aucune instruction dans votre vue.</p>"
+    articles = []
     for instruction in instructions:
-        auteur = instruction["auteur"] or "Compte retiré"
-        cible = ""
-        if instruction["structure"]:
-            cible = f" — {echapper(instruction['structure'])}"
-        items.append(
-            "<article class=\"instruction\">"
-            f"<p class=\"meta\">{echapper(FONCTIONS.get(instruction['echelon'], instruction['echelon']))}"
-            f"{cible} · {echapper(auteur)} · {echapper(fmt_date(instruction['cree_le'][:10]))}</p>"
-            f"<p>{echapper(instruction['texte'])}</p></article>"
+        articles.append(_article(ctx, instruction, _destinataires(conn, instruction["id"])))
+    return "<h2>Instructions</h2>" + "".join(articles)
+
+
+def _article(ctx, instruction, destinataires, seule=False):
+    auteur = instruction["auteur"] if "auteur" in instruction.keys() else ""
+    if not auteur:
+        auteur = "Compte retiré"
+    lignes = []
+    for personne in destinataires:
+        etat = "Exécutée" if personne["etat"] == "executee" else "En cours"
+        retour = ""
+        if personne["compte_rendu"] and personne["etat"] == "executee":
+            retour = f" — {echapper(personne['compte_rendu'])}"
+        lignes.append(f"<li>{echapper(personne['nom'])} : {etat}{retour}</li>")
+    retour_form = ""
+    if any(personne["utilisateur_id"] == ctx.utilisateur["id"] and personne["etat"] != "executee" for personne in destinataires):
+        identifiant = int(instruction["id"])
+        retour_form = (
+            f'<form method="post" action="/instructions/{identifiant}/executer">'
+            + jeton_cache(ctx)
+            + f'<label for="cr-{identifiant}">Votre retour</label>'
+            + f'<input id="cr-{identifiant}" name="compte_rendu" maxlength="2000">'
+            + '<button type="submit">Marquer exécutée</button></form>'
         )
-    return "<h2>Instructions publiées</h2>" + "".join(items)
-
-
-def _liste_sommations(sommations):
-    if not sommations:
-        return "<h2>Sommations</h2><p>Aucune sommation dans votre vue.</p>"
-    items = []
-    for sommation in sommations:
-        code = ""
-        if sommation["code"]:
-            code = f" · {echapper(sommation['code'])}"
-        items.append(
-            f'<article class="sommation" data-sommation="{echapper(sommation["structure"])}">'
-            f'<p class="meta">{echapper(sommation["structure"])}{code} · '
-            f'{echapper(sommation["auteur"] or "Compte retiré")} · '
-            f'{echapper(fmt_date(sommation["cree_le"][:10]))}</p>'
-            f"<p>{echapper(sommation['texte'])}</p></article>"
-        )
-    return "<h2>Sommations</h2>" + "".join(items)
-
-
-def _formulaires(ctx, structures, retards):
-    blocs = []
-    for echelon, libelle in (
-        ("ministre", "Instruction du ministre"),
-        ("chef_cabinet", "Instruction du chef de cabinet"),
-        ("secretaire_general", "Instruction du secrétaire général"),
+    rouvrir = ""
+    if instruction["etat"] == "executee" and (
+        est_hierarchie(ctx.utilisateur) or instruction["cree_par"] == ctx.utilisateur["id"]
     ):
-        if not _peut_ecrire(ctx.utilisateur, echelon):
-            continue
-        structure = ""
-        if echelon == "secretaire_general":
-            structure = (
-                '<label for="structure-instruction">Direction ou service</label>'
-                + _select("structure-instruction", "structure_id", structures)
-            )
-        blocs.append(
-            f"<h2>{echapper(libelle)}</h2>"
-            '<form method="post" action="/instructions" class="formulaire">'
+        identifiant = int(instruction["id"])
+        rouvrir = (
+            f'<form method="post" action="/instructions/{identifiant}/rouvrir">'
             + jeton_cache(ctx)
-            + f'<input type="hidden" name="echelon" value="{echelon}">'
-            + structure
-            + '<label for="texte-' + echelon + '">Texte</label>'
-            + f'<textarea id="texte-{echelon}" name="texte" required maxlength="2000"></textarea>'
-            + '<button type="submit">Publier</button></form>'
+            + '<button type="submit" class="secondaire">Rouvrir</button></form>'
         )
-    if est_hierarchie(ctx.utilisateur):
-        options_retard = ['<option value="">Sans projet précis</option>']
-        for projet in retards:
-            if not projet["structure_id"]:
-                continue
-            options_retard.append(
-                f'<option value="{int(projet["id"])}">{echapper(projet["code"])}</option>'
-            )
-        blocs.append(
-            "<h2>Sommer d’avancer</h2>"
-            "<p class=\"aide\">Le BSD et la hiérarchie peuvent sommer une direction depuis cette page. "
-            "Ce n’est pas une citation d’un texte juridique.</p>"
-            '<form method="post" action="/instructions/sommation" class="formulaire">'
-            + jeton_cache(ctx)
-            + '<label for="structure-sommation">Direction ou service</label>'
-            + _select("structure-sommation", "structure_id", structures)
-            + '<label for="projet-sommation">Projet en retard rattaché</label>'
-            + f'<select id="projet-sommation" name="projet_id">{"".join(options_retard)}</select>'
-            + '<label for="texte-sommation">Message</label>'
-            + '<textarea id="texte-sommation" name="texte" required maxlength="2000"></textarea>'
-            + '<button type="submit">Sommer d’avancer</button></form>'
-        )
-    return "".join(blocs)
+    lien = ""
+    if not seule:
+        lien = f'<p><a href="/instructions/{int(instruction["id"])}">Ouvrir</a></p>'
+    echeance = ""
+    if instruction["echeance"]:
+        marque = "En retard" if en_retard(instruction, ctx.aujourd_hui) else "Échéance"
+        echeance = f"<p class=\"meta\">{marque} : {echapper(fmt_date(instruction['echeance']))}</p>"
+    return (
+        '<article class="instruction">'
+        f"<p class=\"meta\">{echapper(FONCTIONS.get(instruction['echelon'], instruction['echelon']))}"
+        f" · {echapper(auteur)} · {echapper(fmt_date(instruction['cree_le'][:10]))}</p>"
+        f"<p>{echapper(instruction['texte'])}</p>"
+        + echeance
+        + f"<ul>{''.join(lignes)}</ul>"
+        + lien
+        + retour_form
+        + rouvrir
+        + "</article>"
+    )
 
 
-def _select(identifiant, nom, structures):
-    options = ['<option value="">Choisir</option>']
-    for structure in structures:
-        options.append(
-            f'<option value="{int(structure["id"])}">{echapper(structure["nom"])}</option>'
+def _formulaire(ctx, conn):
+    cible = SUIVANT.get(ctx.utilisateur["fonction"] or "")
+    if cible is None:
+        if ctx.utilisateur["fonction"] == "charge_etudes":
+            return (
+                "<h2>Votre niveau</h2>"
+                "<p>Vous recevez les instructions. Vous n’instruisez pas en dessous.</p>"
+            )
+        return ""
+    personnes = _possibles(conn, ctx.utilisateur, cible)
+    if personnes:
+        cases = "".join(
+            "<label class=\"case\">"
+            f'<input type="checkbox" name="destinataire" value="{int(personne["id"])}"> '
+            f"{echapper(personne['nom'])}</label>"
+            for personne in personnes
         )
-    return f'<select id="{identifiant}" name="{nom}" required>{"".join(options)}</select>'
+    else:
+        cases = (
+            "<p>Aucun compte de ce niveau pour l’instant. "
+            "L’administrateur le crée, puis vous pourrez lui adresser l’instruction.</p>"
+        )
+    portee = (
+        "Vous voyez les destinataires de tout le ministère."
+        if ctx.utilisateur["fonction"] in MINISTERE
+        else "Vous ne voyez que les destinataires de votre direction."
+    )
+    return (
+        f"<h2>Instruction vers : {echapper(FONCTIONS[cible])}</h2>"
+        f'<form method="post" action="/instructions" class="formulaire" data-niveau="{cible}">'
+        + jeton_cache(ctx)
+        + f"<p>{echapper(portee)} Vous attendez leur retour.</p>"
+        + cases
+        + '<label for="texte-instruction">Texte</label>'
+        + '<textarea id="texte-instruction" name="texte" required maxlength="2000"></textarea>'
+        + '<label for="echeance-instruction">Échéance (facultative)</label>'
+        + '<input type="date" id="echeance-instruction" name="echeance">'
+        + '<button type="submit">Envoyer l’instruction</button></form>'
+    )

@@ -1,8 +1,8 @@
-"""Tableau de bord du BSD. Les lignes exemple restent fictives."""
+"""Tableau de bord du BSD."""
 
 from pathlib import Path
 from secrets import token_hex
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from mahh.calculs import (
     FINANCEMENTS_EXEMPLE,
@@ -15,7 +15,7 @@ from mahh.calculs import (
 )
 from mahh.config import repertoire_fichiers
 from mahh.db import base
-from mahh.documents import TAILLE_MAX, _chemin_stockage, _nom_fichier
+from mahh.documents import MESSAGE_TAILLE, TAILLE_MAX, _chemin_stockage, _nom_fichier, suffixe_stockage
 from mahh.droits import (
     est_hierarchie,
     exiger_admin,
@@ -246,8 +246,8 @@ def action_piece(ctx, projet_id):
             if not fichier[1]:
                 return page_projet(ctx, projet_id, erreur="Le fichier est vide.")
             if len(fichier[1]) > TAILLE_MAX:
-                return page_projet(ctx, projet_id, erreur="Le fichier dépasse 15 Mo.")
-            stockage = token_hex(16) + Path(nom_fichier).suffix.lower()
+                return page_projet(ctx, projet_id, erreur=MESSAGE_TAILLE)
+            stockage = token_hex(16) + suffixe_stockage(nom_fichier)
         conn.execute(
             """
             INSERT INTO piece (
@@ -307,24 +307,48 @@ def _filtrer(conn, utilisateur, secteur, direction, statut):
 
 
 def _corps(ctx, resume, projets, attention, responsables, secteur, direction, statut):
-    bandeau = _bandeau(resume)
     filtres = _filtres(responsables, secteur, direction, statut)
-    indicateur = _indicateurs(ctx, resume)
-    secteurs = _tableau_secteurs(resume["par_secteur"])
-    statuts = _tableau_statuts(resume["par_statut"])
-    attentions = _liste_attention(ctx, attention)
+    if resume["nombre"] == 0:
+        if secteur or direction or statut:
+            texte = "Aucun projet ne correspond à ce filtre."
+        else:
+            texte = (
+                "Aucun projet enregistré. Le BSD saisit le code, le secteur, le budget, "
+                "l’avancement et la direction responsable."
+            )
+        bandeau = f'<p class="vide" data-bandeau="vide">{texte}</p>'
+        indicateur = (
+            '<section class="indicateurs" id="indicateurs">'
+            + _carte("projets", "Projets suivis", "0")
+            + "</section>"
+        )
+        secteurs = ""
+        statuts = ""
+        attentions = "<h2>Points d’attention</h2><p>Aucun projet en retard ou à risque.</p>"
+    else:
+        bandeau = ""
+        indicateur = _indicateurs(ctx, resume)
+        secteurs = _tableau_secteurs(resume["par_secteur"])
+        statuts = _tableau_statuts(resume["par_statut"])
+        attentions = _liste_attention(ctx, attention)
     registre = _registre(projets, ctx)
     saisie = ""
     if ctx.utilisateur["administrateur"]:
         saisie = '<p><a class="bouton" href="/bsd/saisie">Saisir un projet</a></p>'
+    parametres = {
+        cle: valeur
+        for cle, valeur in (("secteur", secteur), ("direction", direction), ("statut", statut))
+        if valeur
+    }
+    lien = "/bsd/export.csv"
+    if parametres:
+        lien += "?" + urlencode(parametres)
+    export = f'<p><a class="bouton secondaire" href="{echapper(lien)}">Exporter le registre (CSV)</a></p>'
     note = (
-        "<p class=\"note\">« En cours d’exécution » reprend la formule du classeur : "
-        "dans les délais, à risque ou en retard. Suspendu et en préparation n’y entrent pas. "
-        "La note du BSD ne définit pas ce terme. Les moyennes sont pondérées par le budget. "
-        f"Les jours restants sont calculés au {echapper(fmt_date(ctx.aujourd_hui.isoformat()))}, "
-        "date du serveur. Le classeur d’exemple était une photo au 10 novembre 2026. "
-        "La direction responsable est le libellé de la colonne Responsable. "
-        "Le rattachement à une structure de la note est un autre champ, choisi explicitement. "
+        "<p class=\"note\">« En cours d’exécution » regroupe les projets dans les délais, "
+        "à risque ou en retard. Suspendu et en préparation n’y entrent pas. "
+        "Les moyennes sont pondérées par le budget. "
+        f"Les jours restants sont calculés au {echapper(fmt_date(ctx.aujourd_hui.isoformat()))}. "
         "Un clic sur le code ouvre le dossier du projet : notes, rapports et classement des documents physiques.</p>"
     )
     if est_hierarchie(ctx.utilisateur):
@@ -345,34 +369,9 @@ def _corps(ctx, resume, projets, attention, responsables, secteur, direction, st
     return (
         "<h1>Tableau de bord du BSD</h1>"
         '<p class="chapeau">Bureau de stratégie et de développement. '
-        "Suivi des projets de toutes les directions, calé sur les colonnes du classeur.</p>"
-        + bandeau + note + portee + filtres + saisie + indicateur + secteurs + statuts + attentions + registre
+        "Suivi des projets des directions.</p>"
+        + bandeau + note + portee + filtres + saisie + export + indicateur + secteurs + statuts + attentions + registre
     )
-
-
-def _bandeau(resume):
-    if resume["nombre"] == 0:
-        texte = "Aucune ligne pour ce filtre. Rien sur cet écran n’est un chiffre officiel publié."
-        genre = "vide"
-    elif resume["exemples"] == resume["nombre"]:
-        texte = (
-            "Jeu d’exemple fictif, repris du classeur du 10 novembre 2026. "
-            "Ce ne sont pas les projets du ministère. Les totaux ne sont pas des chiffres officiels."
-        )
-        genre = "exemple"
-    elif resume["exemples"]:
-        texte = (
-            "Des lignes portent la pastille exemple : elles sont fictives. "
-            "Le total mélange cet exemple et la saisie. Les totaux ne sont pas des chiffres officiels."
-        )
-        genre = "mixte"
-    else:
-        texte = (
-            "Aucune ligne exemple dans ce filtre. Ces chiffres sont des saisies de l’application. "
-            "Ils ne sont pas des chiffres officiels publiés."
-        )
-        genre = "saisie"
-    return f'<p class="bandeau bandeau-{genre}" data-bandeau="{genre}">{echapper(texte)}</p>'
 
 
 def _filtres(responsables, secteur, direction, statut):
@@ -487,7 +486,7 @@ def _liste_attention(ctx, lignes):
     return (
         "<h2>Points d’attention</h2>"
         "<p>Retards d’abord, puis projets à risque, par échéance. "
-        "La liste se recalcule. Le classeur la tenait à la main. Le projet suspendu n’y figure pas.</p>"
+        "Le projet suspendu n’y figure pas.</p>"
         f'<ol class="attention" data-attention>{"".join(items)}</ol>'
     )
 
@@ -496,13 +495,9 @@ def _registre(projets, ctx):
     del ctx
     lignes = []
     for projet in projets:
-        pastille = (
-            '<span class="badge-exemple">exemple</span>' if projet["exemple"] else '<span class="badge-saisie">saisie</span>'
-        )
         lignes.append(
-            f'<tr data-code="{echapper(projet["code"])}" data-exemple="{1 if projet["exemple"] else 0}">'
+            f'<tr data-code="{echapper(projet["code"])}">'
             f'<td><a href="/bsd/projet/{int(projet["id"])}">{echapper(projet["code"])}</a></td>'
-            f"<td>{pastille}</td>"
             f'<td>{echapper(projet["secteur"])}</td>'
             f'<td>{echapper(projet["titre"])}</td>'
             f'<td>{echapper(projet["localisation"])}</td>'
@@ -515,11 +510,11 @@ def _registre(projets, ctx):
             f'<td>{echapper(projet["responsable"])}</td>'
             "</tr>"
         )
-    vide = "" if lignes else '<tr><td colspan="12">Aucun projet pour ce filtre.</td></tr>'
+    vide = "" if lignes else '<tr><td colspan="11">Aucun projet enregistré.</td></tr>'
     return (
         "<h2>Registre</h2>"
         '<div class="defilement"><table class="registre"><caption>Registre des projets</caption><thead><tr>'
-        "<th>Identifiant</th><th></th><th>Secteur</th><th>Projet</th><th>Localisation</th><th>Statut</th>"
+        "<th>Identifiant</th><th>Secteur</th><th>Projet</th><th>Localisation</th><th>Statut</th>"
         "<th>Budget</th><th>Décaissement</th><th>Avancement</th><th>Début</th><th>Échéance</th>"
         "<th>Direction responsable</th></tr></thead><tbody>"
         + ("".join(lignes) or vide) + "</tbody></table></div>"
@@ -529,8 +524,6 @@ def _registre(projets, ctx):
 def _fiche(ctx, projet, pieces, structures, rattachee):
     jours = jours_restants(projet, ctx.aujourd_hui)
     decaisse = budget_decaisse(projet)
-    badge = "exemple fictif" if projet["exemple"] else "saisie"
-    genre = "exemple" if projet["exemple"] else "saisie"
     champs = [
         ("Identifiant", projet["code"]),
         ("Secteur", projet["secteur"]),
@@ -556,14 +549,8 @@ def _fiche(ctx, projet, pieces, structures, rattachee):
     actions = ""
     if ctx.utilisateur["administrateur"]:
         actions = f'<p><a class="bouton" href="/bsd/projet/{int(projet["id"])}/modifier">Modifier</a></p>'
-        if projet["exemple"]:
-            actions += (
-                "<p class=\"aide\">Une ligne exemple reste marquée exemple, même modifiée. "
-                "Une saisie réelle est une nouvelle ligne.</p>"
-            )
     return (
         '<p class="fil"><a href="/bsd">Tableau de bord</a></p>'
-        f'<p class="badge-exemple" data-genre="{genre}">{echapper(badge)}</p>'
         f'<h1>{echapper(projet["code"])}</h1>'
         f"<dl>{lignes}</dl>{actions}"
         + _rattachement(ctx, projet, structures)
@@ -582,8 +569,7 @@ def _rattachement(ctx, projet, structures):
         )
     return (
         "<h2>Rattachement</h2>"
-        "<p class=\"aide\">Les lignes d’exemple ne sont rattachées à aucune structure : "
-        "la correspondance avec l’arbre n’est pas établie. Le rattachement est un choix explicite.</p>"
+        "<p class=\"aide\">Le rattachement à une direction ou à un service est un choix explicite.</p>"
         f'<form method="post" action="/bsd/projet/{int(projet["id"])}/rattacher" class="formulaire">'
         + jeton_cache(ctx)
         + '<label for="structure-rattachement">Direction ou service</label>'

@@ -19,12 +19,17 @@ from mahh.securite import maintenant
 from mahh.texte import echapper
 from mahh.validation import nom_noeud
 
-EXTENSIONS = {
-    ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".csv",
-    ".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods",
-}
-TAILLE_MAX = 15 * 1024 * 1024
-_STOCKAGE = re.compile(r"[a-f0-9]{32}\.[a-z0-9]{1,8}")
+TAILLE_MAX = 100 * 1024 * 1024
+MESSAGE_TAILLE = "Le fichier dépasse 100 Mo."
+_SUFFIXE = re.compile(r"^\.[a-z0-9]{1,16}$")
+_STOCKAGE = re.compile(r"[a-f0-9]{32}(\.[a-z0-9]{1,16})?")
+
+
+def suffixe_stockage(nom):
+    brut = Path(str(nom)).suffix.lower()
+    if _SUFFIXE.fullmatch(brut):
+        return brut
+    return ""
 
 
 def _noeud(conn, noeud_id):
@@ -42,7 +47,7 @@ def _fil(conn, noeud):
     chaine = []
     courant = noeud
     garde = 0
-    while courant is not None and garde < 30:
+    while courant is not None and garde < 200:
         chaine.append(courant)
         if courant["parent_id"] is None:
             break
@@ -90,26 +95,16 @@ def _visible(conn, utilisateur, noeud):
     )
 
 
-def _profondeur(conn, noeud_id):
-    profondeur = 0
-    courant = noeud_id
-    while courant is not None and profondeur < 30:
-        ligne = conn.execute("SELECT parent_id FROM noeud WHERE id = ?", (courant,)).fetchone()
-        if ligne is None:
-            break
-        courant = ligne["parent_id"]
-        profondeur += 1
-    return profondeur
-
-
 def _lien_fil(conn, utilisateur, noeud):
     if not _visible(conn, utilisateur, noeud):
         return echapper(noeud["nom"])
     return f'<a href="/noeud/{int(noeud["id"])}">{echapper(noeud["nom"])}</a>'
 
 
-def page_directions(ctx):
+def page_directions(ctx, erreur=None):
     exiger_connexion(ctx)
+    from mahh.organigramme import rendu_attributions
+
     with base() as conn:
         domaines = conn.execute(
             """
@@ -133,7 +128,6 @@ def page_directions(ctx):
                     f'<a href="/noeud/{int(structure["id"])}" data-nom="{echapper(structure["nom"])}">'
                     f'{echapper(structure["nom"])}</a>'
                     f"{sous_titre}"
-                    f'<p class="lecture">{echapper(structure["lecture"])}</p>'
                     "</li>"
                 )
             if not cartes:
@@ -144,15 +138,18 @@ def page_directions(ctx):
                 f'<ul class="structures">{"".join(cartes)}</ul>'
                 "</section>"
             )
-    corps = """
-    <h1>Directions</h1>
-    <p class="chapeau">Arborescence reprise de la note du 10 novembre 2026.
-    Les sigles qu’elle ne développe pas restent des sigles, avec la lecture indiquée sous chaque nom.
-    La hiérarchie voit toutes les directions. Une direction ou un service ne voit que la sienne.
-    Les directions citées comme responsables dans le classeur d’exemple ne sont pas ajoutées ici :
-    les deux pièces ne disent pas qu’elles sont les mêmes structures.</p>
-    """ + "".join(blocs)
-    return page("Directions", corps, ctx, actif="directions")
+        if not blocs and not est_hierarchie(ctx.utilisateur):
+            raise Interdit("Vous n’avez pas de privilège sur les directions.")
+        attributions = rendu_attributions(ctx, conn)
+    corps = (
+        "<h1>Directions</h1>"
+        '<p class="chapeau">Les directions du ministère et les attributions de chacune. '
+        "L’organigramme se construit à part, par l’administrateur.</p>"
+        + attributions
+        + "<h2>Dossiers</h2>"
+        + "".join(blocs)
+    )
+    return page("Directions", corps, ctx, actif="directions", erreur=erreur)
 
 
 def page_noeud(ctx, noeud_id, erreur=None):
@@ -201,13 +198,38 @@ def _corps_noeud(ctx, conn, noeud, droits, fil, enfants, libelles):
         f'<p class="privileges" data-privileges="{echapper(privileges)}" data-admin="{admin}">'
         f"{echapper(libelle_droits(droits, ctx.utilisateur['administrateur']))}</p>"
     )
-    catalogue = ""
-    if libelles:
-        items = "".join(f"<li>{echapper(ligne['texte'])}</li>" for ligne in libelles)
-        catalogue = (
-            '<section class="catalogue"><h2>Libellés de la note, repris tels quels</h2>'
-            "<p>Aucune de ces rubriques n’est chiffrée dans ce socle.</p>"
-            f"<ul>{items}</ul></section>"
+    from mahh.organigramme import rendu_attributions
+
+    fonctions = ""
+    if noeud["genre"] in ("domaine", "structure"):
+        fonctions = rendu_attributions(ctx, conn, noeud_id=noeud["id"])
+    from mahh.indicateurs import LIBELLES, rendu as rendu_indicateurs
+
+    if noeud["nom"] == "ANASP":
+        restants = [
+            ligne for ligne in libelles
+            if ligne["texte"] not in ("Organigramme", "Attribution") and ligne["texte"] not in LIBELLES
+        ]
+        indicateurs = rendu_indicateurs(ctx, conn, f"/noeud/{int(noeud['id'])}")
+    elif noeud["nom"] == "DGA":
+        restants = [
+            ligne for ligne in libelles if ligne["texte"] not in ("Organigramme", "Attribution")
+        ]
+        indicateurs = rendu_indicateurs(ctx, conn, f"/noeud/{int(noeud['id'])}")
+    else:
+        restants = [
+            ligne for ligne in libelles if ligne["texte"] not in ("Organigramme", "Attribution")
+        ]
+        indicateurs = ""
+    catalogue = fonctions + indicateurs
+    if restants:
+        cartes = "".join(
+            f'<article class="carte"><h3>{echapper(ligne["texte"])}</h3></article>'
+            for ligne in restants
+        )
+        catalogue += (
+            '<section class="indicateurs-direction"><h2>Indicateurs</h2>'
+            f'<div class="cartes">{cartes}</div></section>'
         )
     if noeud["nom"] == "BSD" and noeud["genre"] == "structure":
         catalogue += (
@@ -279,7 +301,7 @@ def _corps_noeud(ctx, conn, noeud, droits, fil, enfants, libelles):
             f"{jeton_cache(ctx)}"
             '<label for="fichier">Fichier</label>'
             '<input id="fichier" name="fichier" type="file" required>'
-            "<p class=\"aide\">PDF, image, texte, CSV ou document bureautique. 15&nbsp;Mo au plus.</p>"
+            "<p class=\"aide\">Tout type de fichier. 100&nbsp;Mo au plus.</p>"
             '<button type="submit">Déposer le fichier</button></form></section>'
         )
     return entete + catalogue + "<h2>Dossiers et fichiers</h2>" + liste + formulaires
@@ -293,8 +315,6 @@ def action_dossier(ctx, noeud_id):
         return page_noeud(ctx, noeud_id, erreur=exc.message)
     with base() as conn:
         parent = _exiger_parent_creation(conn, ctx, noeud_id)
-        if _profondeur(conn, parent["id"]) >= 12:
-            return page_noeud(ctx, noeud_id, erreur="Ce dossier est déjà trop profond.")
         if conn.execute(
             "SELECT id FROM noeud WHERE parent_id = ? AND nom = ?",
             (parent["id"], nom),
@@ -325,11 +345,10 @@ def action_fichier(ctx, noeud_id):
     if not contenu:
         return page_noeud(ctx, noeud_id, erreur="Le fichier est vide.")
     if len(contenu) > TAILLE_MAX:
-        return page_noeud(ctx, noeud_id, erreur="Le fichier dépasse 15 Mo.")
-    suffixe = Path(nom).suffix.lower()
+        return page_noeud(ctx, noeud_id, erreur=MESSAGE_TAILLE)
     from secrets import token_hex
 
-    stockage = token_hex(16) + suffixe
+    stockage = token_hex(16) + suffixe_stockage(nom)
     with base() as conn:
         parent = _exiger_parent_creation(conn, ctx, noeud_id)
         if conn.execute(
@@ -443,11 +462,6 @@ def _nom_fichier(nom_original):
         raise ValeurRefusee("Le fichier n’a pas de nom.")
     if any(ord(caractere) < 32 for caractere in base):
         raise ValeurRefusee("Le nom du fichier contient un caractère refusé.")
-    suffixe = Path(base).suffix.lower()
-    if suffixe not in EXTENSIONS:
-        raise ValeurRefusee(
-            "Ce type de fichier n’est pas accepté. Déposez un PDF, une image, un texte, un CSV ou un document bureautique."
-        )
     if len(base) > 120:
         base = base[-120:]
     return base

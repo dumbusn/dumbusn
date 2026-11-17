@@ -81,7 +81,7 @@ def utilisateur_par_jeton(conn, jeton):
     if not jeton:
         return None
     empreinte = hashlib.sha256(jeton.encode("utf-8")).hexdigest()
-    return conn.execute(
+    ligne = conn.execute(
         """
         SELECT u.* FROM session s
         JOIN utilisateur u ON u.id = s.utilisateur_id
@@ -89,6 +89,29 @@ def utilisateur_par_jeton(conn, jeton):
         """,
         (empreinte, maintenant()),
     ).fetchone()
+    return _avec_role_entite(conn, ligne)
+
+
+def _avec_role_entite(conn, ligne):
+    """Le rôle de l’entité s’ajoute aux rôles du compte pour l’accès aux écrans."""
+    if ligne is None:
+        return None
+    personne = dict(ligne)
+    roles = set()
+    if personne.get("fonction"):
+        roles.add(personne["fonction"])
+    roles.update((personne.get("roles") or "").split())
+    if personne.get("organigramme_id"):
+        poste = conn.execute(
+            "SELECT niveau FROM organigramme WHERE id = ?",
+            (personne["organigramme_id"],),
+        ).fetchone()
+        if poste and poste["niveau"]:
+            roles.add(poste["niveau"])
+            if not personne["fonction"]:
+                personne["fonction"] = poste["niveau"]
+    personne["roles"] = " ".join(role for role in roles if role)
+    return personne
 
 
 def cookie_jeton(valeur):

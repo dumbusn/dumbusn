@@ -1,14 +1,23 @@
-"""Privilèges. La hiérarchie voit tout. Une direction ne voit que ce qui la concerne. Les groupes complètent."""
+"""Privilèges. Le haut de la chaîne voit tout. À partir du directeur, le compte ne voit que sa direction."""
 
 from mahh.reponse import Interdit, NonConnecte
 
 ACTIONS = ("creer", "consulter", "modifier", "supprimer")
-FONCTIONS = {
-    "ministre": "Ministre",
-    "chef_cabinet": "Chef de cabinet",
-    "secretaire_general": "Secrétaire général",
-    "bsd": "BSD",
-}
+NIVEAUX = (
+    ("ministre", "Ministre"),
+    ("secretaire_general", "Secrétaire général"),
+    ("chef_cabinet", "Chef de cabinet"),
+    ("directeur", "Directeur"),
+    ("directeur_adjoint", "Directeur adjoint"),
+    ("chef_division", "Chef de division"),
+    ("chef_section", "Chef de section"),
+    ("charge_etudes", "Chargé d’études"),
+)
+ACCES_COMPLET = ("ministre", "secretaire_general", "chef_cabinet", "bsd")
+NIVEAUX_DIRECTION = tuple(cle for cle, _libelle in NIVEAUX if cle not in ACCES_COMPLET)
+FONCTIONS = dict(NIVEAUX)
+FONCTIONS["bsd"] = "BSD"
+FONCTION_COMMUNICATION = "communication"
 
 
 def exiger_connexion(ctx):
@@ -19,6 +28,30 @@ def exiger_connexion(ctx):
 def exiger_admin(ctx):
     exiger_connexion(ctx)
     if not ctx.utilisateur["administrateur"]:
+        raise Interdit("Cette page est réservée à l’administrateur.")
+
+
+def roles_du_compte(utilisateur):
+    if not utilisateur:
+        return set()
+    roles = set()
+    if utilisateur["fonction"]:
+        roles.add(utilisateur["fonction"])
+    if "roles" in utilisateur.keys() and utilisateur["roles"]:
+        roles.update(utilisateur["roles"].split())
+    return roles
+
+
+def peut_tenir_organigramme(utilisateur):
+    """L’arbre, l’annuaire et la création d’un agent sont des tâches d’administrateur."""
+    if not utilisateur:
+        return False
+    return bool(utilisateur["administrateur"])
+
+
+def exiger_organigramme(ctx):
+    exiger_connexion(ctx)
+    if not peut_tenir_organigramme(ctx.utilisateur):
         raise Interdit("Cette page est réservée à l’administrateur.")
 
 
@@ -35,7 +68,16 @@ def est_hierarchie(utilisateur):
         return False
     if utilisateur["administrateur"]:
         return True
-    return (utilisateur["fonction"] or "") in FONCTIONS
+    return bool(roles_du_compte(utilisateur) & set(ACCES_COMPLET))
+
+
+def peut_gerer_vitrine(utilisateur):
+    """La page publique : hiérarchie, BSD, administrateur, cellule de communication."""
+    if not utilisateur:
+        return False
+    if est_hierarchie(utilisateur):
+        return True
+    return FONCTION_COMMUNICATION in roles_du_compte(utilisateur)
 
 
 def dans_perimetre(conn, noeud_id, structure_id):
@@ -117,6 +159,99 @@ def peut_voir_bsd(conn, utilisateur):
         (utilisateur["id"],),
     ).fetchone()
     return ligne is not None
+
+
+def peut_voir_directions(conn, utilisateur):
+    if utilisateur is None:
+        return False
+    if est_hierarchie(utilisateur) or utilisateur["structure_id"]:
+        return True
+    ligne = conn.execute(
+        """
+        SELECT 1 FROM appartenance a
+        JOIN droit d ON d.groupe_id = a.groupe_id
+        WHERE a.utilisateur_id = ?
+          AND (d.creer = 1 OR d.consulter = 1 OR d.modifier = 1 OR d.supprimer = 1)
+        """,
+        (utilisateur["id"],),
+    ).fetchone()
+    return ligne is not None
+
+
+def peut_voir_instructions(utilisateur):
+    if not utilisateur:
+        return False
+    return est_hierarchie(utilisateur) or bool(utilisateur["structure_id"])
+
+
+def nom_structure(conn, utilisateur):
+    if not utilisateur or not utilisateur["structure_id"]:
+        return ""
+    ligne = conn.execute(
+        "SELECT nom FROM noeud WHERE id = ?",
+        (utilisateur["structure_id"],),
+    ).fetchone()
+    return ligne["nom"] if ligne else ""
+
+
+def peut_voir_ordures(conn, utilisateur):
+    if utilisateur is None:
+        return False
+    if est_hierarchie(utilisateur):
+        return True
+    return nom_structure(conn, utilisateur) == "ANASP"
+
+
+def peut_voir_reseau(conn, utilisateur, reseau):
+    if utilisateur is None:
+        return False
+    if est_hierarchie(utilisateur):
+        return True
+    attendu = "SEG" if reseau == "seg" else "SNAPE"
+    return nom_structure(conn, utilisateur) == attendu
+
+
+def peut_voir_seg(conn, utilisateur):
+    return peut_voir_reseau(conn, utilisateur, "seg")
+
+
+def peut_voir_snape(conn, utilisateur):
+    return peut_voir_reseau(conn, utilisateur, "snape")
+
+
+def entrees_menu(conn, utilisateur):
+    if utilisateur is None:
+        return []
+    entrees = [("/", "Accueil", "accueil")]
+    if peut_voir_directions(conn, utilisateur):
+        entrees.append(("/directions", "Directions", "directions"))
+    if peut_voir_bsd(conn, utilisateur):
+        entrees.append(("/bsd", "Tableau de bord", "bsd"))
+    if peut_voir_instructions(utilisateur):
+        entrees.append(("/instructions", "Instructions", "instructions"))
+    if peut_voir_ordures(conn, utilisateur):
+        entrees.append(("/ordures", "Ordures", "ordures"))
+    if peut_voir_seg(conn, utilisateur):
+        entrees.append(("/eau/seg", "SEG", "seg"))
+    if peut_voir_snape(conn, utilisateur):
+        entrees.append(("/eau/snape", "SNAPE", "snape"))
+    if peut_gerer_vitrine(utilisateur):
+        entrees.append(("/communication", "Communication", "communication"))
+    if utilisateur["administrateur"]:
+        entrees.append(("/organigramme", "Organigramme", "organigramme"))
+        entrees.append(("/annuaire", "Annuaire", "annuaire"))
+        entrees.append(("/annuaire/nouveau", "Nouvel agent", "nouvel-agent"))
+        entrees.append(("/groupes", "Groupes", "groupes"))
+        entrees.append(("/journal", "Journal", "journal"))
+    if (
+        est_hierarchie(utilisateur)
+        or peut_voir_ordures(conn, utilisateur)
+        or peut_voir_seg(conn, utilisateur)
+        or peut_voir_snape(conn, utilisateur)
+    ):
+        entrees.append(("/carte", "Carte", "carte"))
+    entrees.append(("/compte", "Compte", "compte"))
+    return entrees
 
 
 def exiger_bsd(ctx, conn):

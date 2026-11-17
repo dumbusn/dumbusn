@@ -3,11 +3,9 @@
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import date
-
 from mahh.config import repertoire_donnees
 from mahh.securite import ecrire_mot_initial, hasher, maintenant, preparer_mot_admin
-from mahh.seed import ARBRES, projets_exemples
+from mahh.seed import ARBRES
 from mahh.validation import identifiant as valider_identifiant
 
 SCHEMA = """
@@ -20,6 +18,12 @@ CREATE TABLE IF NOT EXISTS utilisateur (
     fonction TEXT NOT NULL DEFAULT '',
     structure_id INTEGER,
     actif INTEGER NOT NULL DEFAULT 1,
+    courriel TEXT NOT NULL DEFAULT '',
+    organigramme_id INTEGER,
+    matricule TEXT NOT NULL DEFAULT '',
+    telephone TEXT NOT NULL DEFAULT '',
+    intitule_poste TEXT NOT NULL DEFAULT '',
+    roles TEXT NOT NULL DEFAULT '',
     cree_le TEXT NOT NULL
 );
 
@@ -114,20 +118,25 @@ CREATE TABLE IF NOT EXISTS piece (
 
 CREATE TABLE IF NOT EXISTS instruction (
     id INTEGER PRIMARY KEY,
-    echelon TEXT NOT NULL CHECK (echelon IN ('ministre', 'chef_cabinet', 'secretaire_general')),
+    echelon TEXT NOT NULL,
     structure_id INTEGER REFERENCES noeud(id),
     texte TEXT NOT NULL,
     cree_par INTEGER REFERENCES utilisateur(id),
-    cree_le TEXT NOT NULL
+    cree_le TEXT NOT NULL,
+    echeance TEXT NOT NULL DEFAULT '',
+    etat TEXT NOT NULL DEFAULT 'en_cours',
+    execute_le TEXT,
+    execute_par INTEGER,
+    compte_rendu TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS sommation (
-    id INTEGER PRIMARY KEY,
-    structure_id INTEGER NOT NULL REFERENCES noeud(id),
-    projet_id INTEGER REFERENCES projet(id) ON DELETE SET NULL,
-    texte TEXT NOT NULL,
-    cree_par INTEGER REFERENCES utilisateur(id),
-    cree_le TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS instruction_destinataire (
+    instruction_id INTEGER NOT NULL REFERENCES instruction(id) ON DELETE CASCADE,
+    utilisateur_id INTEGER NOT NULL REFERENCES utilisateur(id),
+    etat TEXT NOT NULL DEFAULT 'en_cours',
+    execute_le TEXT,
+    compte_rendu TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (instruction_id, utilisateur_id)
 );
 
 CREATE TABLE IF NOT EXISTS maille (
@@ -135,7 +144,17 @@ CREATE TABLE IF NOT EXISTS maille (
     parent_id INTEGER REFERENCES maille(id),
     genre TEXT NOT NULL CHECK (genre IN ('region', 'prefecture', 'sous_prefecture', 'quartier', 'secteur')),
     nom TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
     exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS ztt (
+    id INTEGER PRIMARY KEY,
+    nom TEXT NOT NULL,
+    maille_id INTEGER NOT NULL REFERENCES maille(id),
+    cree_par INTEGER REFERENCES utilisateur(id),
+    cree_le TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pme (
@@ -216,6 +235,64 @@ CREATE TABLE IF NOT EXISTS signalement (
     cree_le TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS eau_lieu (
+    id INTEGER PRIMARY KEY,
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg', 'snape')),
+    nom TEXT NOT NULL,
+    population INTEGER NOT NULL DEFAULT 0,
+    population_couverte INTEGER NOT NULL DEFAULT 0,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS eau_site (
+    id INTEGER PRIMARY KEY,
+    lieu_id INTEGER NOT NULL REFERENCES eau_lieu(id),
+    nom TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS eau_situation (
+    id INTEGER PRIMARY KEY,
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg')),
+    volume_produit TEXT NOT NULL,
+    volume_distribue TEXT NOT NULL,
+    montant_du TEXT NOT NULL,
+    montant_facture TEXT NOT NULL,
+    montant_recouvre TEXT NOT NULL,
+    exemple INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS eau_demande (
+    id INTEGER PRIMARY KEY,
+    reference TEXT NOT NULL UNIQUE,
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg', 'snape')),
+    lieu_id INTEGER NOT NULL REFERENCES eau_lieu(id),
+    nom TEXT NOT NULL,
+    telephone TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    etat TEXT NOT NULL CHECK (etat IN ('recue', 'abonne')),
+    exemple INTEGER NOT NULL DEFAULT 0,
+    cree_le TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eau_abonnement (
+    id INTEGER PRIMARY KEY,
+    reference TEXT NOT NULL UNIQUE,
+    demande_id INTEGER REFERENCES eau_demande(id),
+    reseau TEXT NOT NULL CHECK (reseau IN ('seg', 'snape')),
+    lieu_id INTEGER NOT NULL REFERENCES eau_lieu(id),
+    nom TEXT NOT NULL,
+    telephone TEXT NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
+    paye INTEGER NOT NULL DEFAULT 0,
+    exemple INTEGER NOT NULL DEFAULT 0,
+    cree_le TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_noeud_parent ON noeud(parent_id);
 CREATE INDEX IF NOT EXISTS idx_session_utilisateur ON session(utilisateur_id);
 """
@@ -279,23 +356,6 @@ def semer(conn):
                     "INSERT INTO libelle (noeud_id, texte, ordre) VALUES (?, ?, ?)",
                     (structure_id, texte, index_libelle),
                 )
-    for projet in projets_exemples():
-        conn.execute(
-            """
-            INSERT INTO projet (
-                code, secteur, titre, localisation, statut, budget_mds, decaissement,
-                avancement, debut, echeance, responsable, financement, jalon,
-                observations, exemple, cree_le, modifie_le
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-            """,
-            (
-                projet["code"], projet["secteur"], projet["titre"], projet["localisation"],
-                projet["statut"], projet["budget_mds"], projet["decaissement"],
-                projet["avancement"], projet["debut"], projet["echeance"],
-                projet["responsable"], projet["financement"], projet["jalon"],
-                projet["observations"], quand, quand,
-            ),
-        )
     brut = os.environ.get("MAHH_ADMIN_IDENTIFIANT", "admin")
     nom_admin = valider_identifiant(brut)
     mot, genere = preparer_mot_admin()
@@ -314,126 +374,273 @@ def semer(conn):
     }
 
 
-def semer_ordures(conn):
-    if conn.execute("SELECT COUNT(*) AS n FROM maille").fetchone()["n"]:
-        return
-    def ajouter(parent, genre, nom):
-        curseur = conn.execute(
-            "INSERT INTO maille (parent_id, genre, nom, exemple) VALUES (?, ?, ?, 1)",
-            (parent, genre, nom),
-        )
-        return curseur.lastrowid
+def retirer_jeu(conn):
+    """Retire les lignes du jeu d’exemple déjà écrites. Les saisies (exemple = 0) restent."""
+    mailles = "SELECT id FROM maille WHERE exemple = 1"
+    lieux = "SELECT id FROM eau_lieu WHERE exemple = 1"
+    abonnements = (
+        "SELECT id FROM abonnement WHERE exemple = 1 "
+        f"OR secteur_id IN ({mailles})"
+    )
+    conn.execute(f"DELETE FROM signalement WHERE exemple = 1 OR abonnement_id IN ({abonnements})")
+    conn.execute(f"DELETE FROM passage WHERE exemple = 1 OR abonnement_id IN ({abonnements})")
+    conn.execute(f"DELETE FROM abonnement WHERE id IN ({abonnements})")
+    conn.execute(
+        "DELETE FROM effectif WHERE exemple = 1 OR pme_id IN (SELECT id FROM pme WHERE exemple = 1)"
+    )
+    conn.execute(
+        "DELETE FROM trajet WHERE exemple = 1 OR pme_id IN (SELECT id FROM pme WHERE exemple = 1)"
+    )
+    conn.execute("DELETE FROM pme_secteur WHERE pme_id IN (SELECT id FROM pme WHERE exemple = 1)")
+    conn.execute(f"DELETE FROM pme_secteur WHERE secteur_id IN ({mailles})")
+    conn.execute(
+        f"UPDATE point_collecte SET secteur_id = NULL WHERE secteur_id IN ({mailles})"
+    )
+    conn.execute("DELETE FROM point_collecte WHERE exemple = 1")
+    conn.execute("DELETE FROM pme WHERE exemple = 1")
+    for genre in ("secteur", "quartier", "sous_prefecture", "prefecture", "region"):
+        conn.execute("DELETE FROM maille WHERE exemple = 1 AND genre = ?", (genre,))
+    conn.execute(f"DELETE FROM eau_abonnement WHERE exemple = 1 OR lieu_id IN ({lieux})")
+    conn.execute(f"DELETE FROM eau_demande WHERE exemple = 1 OR lieu_id IN ({lieux})")
+    conn.execute(f"DELETE FROM eau_site WHERE exemple = 1 OR lieu_id IN ({lieux})")
+    conn.execute("DELETE FROM eau_situation WHERE exemple = 1")
+    conn.execute("DELETE FROM eau_lieu WHERE exemple = 1")
+    conn.execute("DELETE FROM projet WHERE exemple = 1")
 
-    region = ajouter(None, "region", "Région exemple")
-    prefecture = ajouter(region, "prefecture", "Préfecture exemple")
-    commune = ajouter(prefecture, "sous_prefecture", "Commune exemple")
-    nord = ajouter(commune, "quartier", "Quartier Nord")
-    sud = ajouter(commune, "quartier", "Quartier Sud")
-    secteur_a = ajouter(nord, "secteur", "Secteur A")
-    secteur_b = ajouter(sud, "secteur", "Secteur B")
-    secteur_c = ajouter(sud, "secteur", "Secteur C")
 
-    def creer_pme(nom, gestion, contact, jour, heure, frais, secteurs):
-        curseur = conn.execute(
-            """
-            INSERT INTO pme (
-                nom, gestion, contact, jour_collecte, heure_collecte, frais_hors_jour, exemple
-            ) VALUES (?, ?, ?, ?, ?, ?, 1)
-            """,
-            (nom, gestion, contact, jour, heure, frais),
-        )
-        pme_id = curseur.lastrowid
-        for secteur in secteurs:
-            conn.execute(
-                "INSERT INTO pme_secteur (pme_id, secteur_id) VALUES (?, ?)",
-                (pme_id, secteur),
-            )
-        return pme_id
+# Présentation reformulée d’après le décret d’attributions d’août 2025.
+# Les actualités et les communiqués sont rédigés par la cellule, pas chargés ici.
+BLOCS_VITRINE = (
+    (
+        "presentation",
+        "Le ministère",
+        "Le ministère conçoit, prépare et met en œuvre la politique du Gouvernement "
+        "pour l’assainissement, l’hydraulique et les hydrocarbures, puis en suit l’exécution. "
+        "Il prépare les textes de ces trois domaines et veille à leur application.",
+        "2025-08-27",
+        1,
+    ),
+    (
+        "presentation",
+        "Eau, salubrité et hydrocarbures",
+        "L’assainissement porte sur les déchets, les eaux usées et les eaux pluviales, "
+        "en ville comme en zone rurale. L’hydraulique porte sur l’accès à l’eau et la protection "
+        "des ressources. Les hydrocarbures portent sur la qualité des produits, les prix et le gaz butane. "
+        "La Société des eaux de Guinée, l’Agence nationale d’assainissement et de salubrité publique "
+        "et la Société guinéenne des hydrocarbures relèvent de ce périmètre.",
+        "2025-08-27",
+        2,
+    ),
+)
 
-    alpha = creer_pme(
-        "PME Alpha", "commune", "620 00 00 01", "mardi", "7 h 00 – 9 h 00", "15000",
-        (secteur_a, secteur_b),
-    )
-    beta = creer_pme(
-        "PME Bêta", "gouvernorat", "620 00 00 02", "jeudi", "8 h 00 – 10 h 00", "20000",
-        (secteur_c,),
-    )
-    aujourd_hui = date.today().isoformat()
-    conn.execute(
-        "INSERT INTO effectif (pme_id, jour, nombre, exemple) VALUES (?, ?, 6, 1)",
-        (alpha, aujourd_hui),
-    )
-    conn.execute(
-        "INSERT INTO effectif (pme_id, jour, nombre, exemple) VALUES (?, ?, 4, 1)",
-        (beta, aujourd_hui),
-    )
-    conn.execute(
-        "INSERT INTO trajet (pme_id, jour, libelle, exemple) VALUES (?, ?, ?, 1)",
-        (alpha, aujourd_hui, "Secteur A, puis Secteur B"),
-    )
-    conn.execute(
-        "INSERT INTO trajet (pme_id, jour, libelle, exemple) VALUES (?, ?, ?, 1)",
-        (beta, aujourd_hui, "Secteur C, aller et retour"),
-    )
+# Titres déjà publiés par le jeu d’exemple ou par un chargement de communiqués.
+# Ils sont retirés au démarrage. Un texte dont le titre a été réécrit par la cellule reste.
+TITRES_RETIRES = (
+    "Trois domaines",
+    "Réunion de coordination, exemple",
+    "Réunion de coordination exemple",
+    "Chantier de démonstration",
+    "Communiqué de démonstration",
+    "Avis de service, exemple",
+    "Avis de service exemple",
+    "Lancement du Projet eau et assainissement en Guinée",
+    "Eau potable, déchets et gaz butane",
+    "Plan de mobilisation des parties prenantes",
+    "Suivi du projet eau et assainissement",
+)
+
+
+def _inserer_bloc_public(conn, bloc, quand):
+    genre, titre, texte, publie_le, ordre = bloc
     conn.execute(
         """
-        INSERT INTO point_collecte (nom, latitude, longitude, secteur_id, exemple)
-        VALUES (?, ?, ?, ?, 1)
+        INSERT INTO bloc_public (genre, titre, texte, publie_le, ordre, exemple, cree_le, modifie_le)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?)
         """,
-        ("Point ANASP Nord", "9.641200", "-13.578400", secteur_a),
+        (genre, titre, texte, publie_le, ordre, quand, quand),
     )
-    conn.execute(
-        """
-        INSERT INTO point_collecte (nom, latitude, longitude, secteur_id, exemple)
-        VALUES (?, ?, ?, ?, 1)
-        """,
-        ("Point ANASP Sud", "9.632100", "-13.590200", secteur_c),
-    )
+
+
+def semer_vitrine(conn):
     quand = maintenant()
-    awa = conn.execute(
-        """
-        INSERT INTO abonnement (
-            reference, nom, telephone, secteur_id, latitude, longitude, pme_id,
-            montant_gnf, paye, exemple, cree_le
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
-        """,
-        ("ORD-EX-01", "Awa Camara", "621 00 00 11", secteur_a, "9.641110", "-13.578310", alpha, "50000", quand),
-    ).lastrowid
+    for titre in TITRES_RETIRES:
+        conn.execute("DELETE FROM bloc_public WHERE titre = ?", (titre,))
     conn.execute(
         """
-        INSERT INTO abonnement (
-            reference, nom, telephone, secteur_id, latitude, longitude, pme_id,
-            montant_gnf, paye, exemple, cree_le
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?)
-        """,
-        ("ORD-EX-02", "Moussa Barry", "621 00 00 12", secteur_c, "9.632050", "-13.590150", beta, "50000", quand),
+        DELETE FROM bloc_public
+        WHERE genre IN ('actualite', 'communique') AND exemple = 1
+        """
     )
     conn.execute(
         """
-        INSERT INTO passage (abonnement_id, agent, latitude, longitude, jour, heure, exemple)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-        """,
-        (awa, "Aïssatou Bah", "9.641150", "-13.578330", aujourd_hui, "7 h 20"),
-    )
-    conn.execute(
+        DELETE FROM bloc_public
+        WHERE texte LIKE '%lorem%' OR texte LIKE '%Lorem%'
+           OR texte LIKE '%Texte d’exemple%' OR texte LIKE '%Texte d''exemple%'
         """
-        INSERT INTO signalement (abonnement_id, jour, hors_jour, frais_gnf, exemple, cree_le)
-        VALUES (?, ?, 1, ?, 1, ?)
-        """,
-        (awa, aujourd_hui, "15000", quand),
     )
+    for bloc in BLOCS_VITRINE:
+        titre = bloc[1]
+        if conn.execute(
+            "SELECT id FROM bloc_public WHERE titre = ?",
+            (titre,),
+        ).fetchone() is None:
+            _inserer_bloc_public(conn, bloc, quand)
 
 
 def migrer(conn):
     def colonnes(table):
         return {ligne[1] for ligne in conn.execute(f"PRAGMA table_info({table})")}
 
+    definition = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'instruction'"
+    ).fetchone()
+    if definition and definition["sql"] and "CHECK" in definition["sql"]:
+        conn.execute("ALTER TABLE instruction RENAME TO instruction_ancienne")
+        conn.execute(
+            """
+            CREATE TABLE instruction (
+                id INTEGER PRIMARY KEY,
+                echelon TEXT NOT NULL,
+                structure_id INTEGER REFERENCES noeud(id),
+                texte TEXT NOT NULL,
+                cree_par INTEGER REFERENCES utilisateur(id),
+                cree_le TEXT NOT NULL,
+                echeance TEXT NOT NULL DEFAULT '',
+                etat TEXT NOT NULL DEFAULT 'en_cours',
+                execute_le TEXT,
+                execute_par INTEGER,
+                compte_rendu TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        anciennes = colonnes("instruction_ancienne")
+        gardees = [
+            nom
+            for nom in (
+                "id", "echelon", "structure_id", "texte", "cree_par", "cree_le",
+                "echeance", "etat", "execute_le", "execute_par", "compte_rendu",
+            )
+            if nom in anciennes
+        ]
+        liste = ", ".join(gardees)
+        conn.execute(
+            f"INSERT INTO instruction ({liste}) SELECT {liste} FROM instruction_ancienne"
+        )
+        conn.execute("DROP TABLE instruction_ancienne")
+
+    if "courriel" not in colonnes("utilisateur"):
+        conn.execute("ALTER TABLE utilisateur ADD COLUMN courriel TEXT NOT NULL DEFAULT ''")
+    if "code" not in colonnes("maille"):
+        conn.execute("ALTER TABLE maille ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+    if "detail" not in colonnes("maille"):
+        conn.execute("ALTER TABLE maille ADD COLUMN detail TEXT NOT NULL DEFAULT ''")
     if "fonction" not in colonnes("utilisateur"):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN fonction TEXT NOT NULL DEFAULT ''")
     if "structure_id" not in colonnes("utilisateur"):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN structure_id INTEGER")
+    if "organigramme_id" not in colonnes("utilisateur"):
+        conn.execute("ALTER TABLE utilisateur ADD COLUMN organigramme_id INTEGER")
+    for colonne, definition in (
+        ("matricule", "TEXT NOT NULL DEFAULT ''"),
+        ("telephone", "TEXT NOT NULL DEFAULT ''"),
+        ("intitule_poste", "TEXT NOT NULL DEFAULT ''"),
+        ("roles", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if colonne not in colonnes("utilisateur"):
+            conn.execute(f"ALTER TABLE utilisateur ADD COLUMN {colonne} {definition}")
     if "structure_id" not in colonnes("projet"):
         conn.execute("ALTER TABLE projet ADD COLUMN structure_id INTEGER")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bloc_public (
+            id INTEGER PRIMARY KEY,
+            genre TEXT NOT NULL CHECK (genre IN ('presentation', 'actualite', 'communique')),
+            titre TEXT NOT NULL,
+            texte TEXT NOT NULL,
+            publie_le TEXT NOT NULL,
+            ordre INTEGER NOT NULL DEFAULT 0,
+            exemple INTEGER NOT NULL DEFAULT 0,
+            cree_le TEXT NOT NULL,
+            modifie_le TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS organigramme (
+            id INTEGER PRIMARY KEY,
+            parent_id INTEGER REFERENCES organigramme(id) ON DELETE CASCADE,
+            nom TEXT NOT NULL,
+            code TEXT NOT NULL DEFAULT '',
+            intitule TEXT NOT NULL DEFAULT '',
+            ordre INTEGER NOT NULL DEFAULT 0,
+            noeud_id INTEGER REFERENCES noeud(id) ON DELETE SET NULL,
+            niveau TEXT NOT NULL DEFAULT '',
+            cree_le TEXT NOT NULL,
+            modifie_le TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attribution (
+            id INTEGER PRIMARY KEY,
+            noeud_id INTEGER NOT NULL REFERENCES noeud(id) ON DELETE CASCADE,
+            texte TEXT NOT NULL,
+            ordre INTEGER NOT NULL DEFAULT 0,
+            modifie_le TEXT NOT NULL
+        )
+        """
+    )
+    for colonne, definition in (
+        ("echeance", "TEXT NOT NULL DEFAULT ''"),
+        ("etat", "TEXT NOT NULL DEFAULT 'en_cours'"),
+        ("execute_le", "TEXT"),
+        ("execute_par", "INTEGER"),
+        ("compte_rendu", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if colonne not in colonnes("instruction"):
+            conn.execute(f"ALTER TABLE instruction ADD COLUMN {colonne} {definition}")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS journal (
+            id INTEGER PRIMARY KEY,
+            utilisateur_id INTEGER REFERENCES utilisateur(id) ON DELETE SET NULL,
+            action TEXT NOT NULL,
+            chemin TEXT NOT NULL,
+            quand TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_journal_quand ON journal(quand)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_maille_parent ON maille(parent_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_maille_code ON maille(code)")
+    if "niveau" not in colonnes("organigramme"):
+        conn.execute("ALTER TABLE organigramme ADD COLUMN niveau TEXT NOT NULL DEFAULT ''")
+    if "code" not in colonnes("organigramme"):
+        conn.execute("ALTER TABLE organigramme ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_organigramme_code "
+        "ON organigramme(code) WHERE code != ''"
+    )
+
+
+def retirer_organigramme_prerempli(conn):
+    """L’arbre ne reprend plus les directions du classeur. L’administrateur le construit."""
+    conn.execute(
+        """
+        UPDATE utilisateur SET organigramme_id = NULL
+        WHERE organigramme_id IN (
+            WITH RECURSIVE semis(id) AS (
+                SELECT id FROM organigramme WHERE noeud_id IS NOT NULL
+                UNION
+                SELECT o.id FROM organigramme o JOIN semis s ON o.parent_id = s.id
+            )
+            SELECT id FROM semis
+        )
+        """
+    )
+    conn.execute("DELETE FROM organigramme WHERE noeud_id IS NOT NULL")
 
 
 def preparer():
@@ -442,7 +649,12 @@ def preparer():
         conn.executescript(SCHEMA)
         migrer(conn)
         info = semer(conn)
-        semer_ordures(conn)
+        retirer_jeu(conn)
+        semer_vitrine(conn)
+        retirer_organigramme_prerempli(conn)
+        from mahh.decoupage import semer_decoupage
+
+        semer_decoupage(conn)
         conn.commit()
         return info
     except Exception:

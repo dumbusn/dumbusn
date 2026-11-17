@@ -19,18 +19,45 @@ AVIS = {
     ),
     "utilisateur-desactive": "Le compte a été désactivé.",
     "mot-de-passe-change": "Le mot de passe a été changé. Connectez-vous à nouveau.",
-    "projet-cree": "Le projet a été ajouté au registre. Il n’est pas marqué exemple.",
+    "projet-cree": "Le projet a été ajouté au registre.",
+    "localite-enregistree": "La localité a été enregistrée.",
+    "pme-enregistree": "La PME a été enregistrée.",
+    "lieu-enregistre": "Le lieu a été enregistré.",
     "projet-modifie": "Le projet a été modifié.",
     "projet-supprime": "Le projet a été retiré du registre.",
     "projet-rattache": "Le rattachement a été enregistré.",
     "piece-ajoutee": "L’élément a été ajouté au dossier du projet.",
     "instruction-creee": "L’instruction a été publiée.",
-    "sommation-creee": "La direction a été sommée d’avancer.",
+    "instruction-envoyee": "L’instruction est enregistrée et le message est parti.",
+    "instruction-sans-courriel": (
+        "L’instruction est enregistrée. L’envoi par e-mail n’est pas configuré."
+    ),
+    "instruction-sans-adresse": (
+        "L’instruction est enregistrée. Le destinataire n’a pas d’adresse électronique."
+    ),
+    "instruction-courriel-echec": (
+        "L’instruction est enregistrée. L’envoi par e-mail n’a pas abouti."
+    ),
+    "ztt-creee": "La zone de traitement et de tri a été enregistrée.",
+    "instruction-executee": "L’instruction a été marquée exécutée.",
+    "instruction-rouverte": "L’instruction a été rouverte.",
     "abonnement-cree": "L’abonnement est enregistré. Le paiement ne l’est pas encore.",
     "paiement-enregistre": "Le paiement a été enregistré.",
     "signalement-enregistre": "Le signalement « poubelle pleine » a été enregistré.",
     "passage-enregistre": "La position de l’agent a été enregistrée.",
     "suivi-enregistre": "Le suivi du jour a été enregistré.",
+    "demande-eau-creee": "La demande d’eau est enregistrée.",
+    "abonnement-eau-cree": "L’abonnement d’eau est ouvert. Le paiement ne l’est pas encore.",
+    "paiement-eau-enregistre": "Le paiement de l’abonnement d’eau a été enregistré.",
+    "bloc-cree": "Le bloc a été publié sur la page publique.",
+    "bloc-modifie": "Le bloc a été modifié.",
+    "bloc-retire": "Le bloc a été retiré de la page publique.",
+    "poste-cree": "La case a été ajoutée à l’organigramme.",
+    "poste-modifie": "La case de l’organigramme a été modifiée.",
+    "poste-retire": "La case a été retirée de l’organigramme.",
+    "attribution-creee": "L’attribution a été ajoutée.",
+    "attribution-modifiee": "L’attribution a été modifiée.",
+    "attribution-retiree": "L’attribution a été retirée.",
 }
 
 
@@ -47,24 +74,24 @@ def jeton_cache(ctx):
 def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
     utilisateur = ctx.utilisateur
     if utilisateur is None:
-        navigation = ""
-        session = ""
-    else:
-        liens = [
-            ("/", "Accueil", "accueil"),
-            ("/directions", "Directions", "directions"),
-            ("/bsd", "Tableau de bord", "bsd"),
-            ("/instructions", "Instructions", "instructions"),
-            ("/ordures", "Ordures", "ordures"),
-        ]
-        if utilisateur["administrateur"]:
-            liens.extend(
-                (
-                    ("/groupes", "Groupes", "groupes"),
-                    ("/utilisateurs", "Utilisateurs", "utilisateurs"),
-                )
+        if ctx.chemin == "/connexion":
+            navigation = ""
+            session = ""
+        else:
+            from mahh.site_public import menu_public
+
+            navigation = menu_public(ctx.chemin)
+            session = (
+                '<div class="session">'
+                '<a class="bouton" href="/connexion">Se connecter</a>'
+                "</div>"
             )
-        liens.append(("/compte", "Compte", "compte"))
+    else:
+        from mahh.db import base
+        from mahh.droits import entrees_menu
+
+        with base() as conn:
+            liens = entrees_menu(conn, utilisateur)
         elements = []
         for href, libelle, cle in liens:
             classe = " nav-accueil" if cle == "accueil" else ""
@@ -94,6 +121,7 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
   <meta name="robots" content="noindex">
   <title>{echapper(titre)} — Ministère</title>
   <link rel="stylesheet" href="/statique/style.css">
+  <script src="/statique/outils.js" defer></script>
 </head>
 <body>
   <div class="tricolore" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -110,7 +138,7 @@ def page(titre, corps, ctx, actif=None, erreur=None, statut=200):
     {corps}
   </main>
   <footer>
-    <p>Socle local. Les projets marqués « exemple » sont fictifs et ne sont pas ceux du ministère.</p>
+    <p>Ministère de l’Assainissement, de l’Hydraulique et des Hydrocarbures — République de Guinée.</p>
   </footer>
 </body>
 </html>"""
