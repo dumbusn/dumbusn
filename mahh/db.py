@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS utilisateur (
     structure_id INTEGER,
     actif INTEGER NOT NULL DEFAULT 1,
     courriel TEXT NOT NULL DEFAULT '',
+    organigramme_id INTEGER,
     cree_le TEXT NOT NULL
 );
 
@@ -533,6 +534,8 @@ def migrer(conn):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN fonction TEXT NOT NULL DEFAULT ''")
     if "structure_id" not in colonnes("utilisateur"):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN structure_id INTEGER")
+    if "organigramme_id" not in colonnes("utilisateur"):
+        conn.execute("ALTER TABLE utilisateur ADD COLUMN organigramme_id INTEGER")
     if "structure_id" not in colonnes("projet"):
         conn.execute("ALTER TABLE projet ADD COLUMN structure_id INTEGER")
     conn.execute(
@@ -556,6 +559,7 @@ def migrer(conn):
             id INTEGER PRIMARY KEY,
             parent_id INTEGER REFERENCES organigramme(id) ON DELETE CASCADE,
             nom TEXT NOT NULL,
+            code TEXT NOT NULL DEFAULT '',
             intitule TEXT NOT NULL DEFAULT '',
             ordre INTEGER NOT NULL DEFAULT 0,
             noeud_id INTEGER REFERENCES noeud(id) ON DELETE SET NULL,
@@ -601,6 +605,12 @@ def migrer(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_maille_code ON maille(code)")
     if "niveau" not in colonnes("organigramme"):
         conn.execute("ALTER TABLE organigramme ADD COLUMN niveau TEXT NOT NULL DEFAULT ''")
+    if "code" not in colonnes("organigramme"):
+        conn.execute("ALTER TABLE organigramme ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_organigramme_code "
+        "ON organigramme(code) WHERE code != ''"
+    )
 
 
 def semer_organigramme(conn):

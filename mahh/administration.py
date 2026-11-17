@@ -345,6 +345,7 @@ def page_utilisateurs(ctx, erreur=None):
         + '<label class="case"><input type="checkbox" name="administrateur"> Administrateur de l’application</label>'
         + '<p class="aide">Le ministre, le secrétaire général, le chef de cabinet et le BSD voient tout le ministère. '
         "À partir du directeur, le compte ne voit que la direction rattachée, et ce qui la concerne. "
+        "L’affectation dans l’organigramme fixe le rôle : la personne ne voit que ce que ce rôle autorise. "
         "La cellule de communication rédige la page publique, sans ouvrir les directions.</p>"
         + '<button type="submit">Créer le compte</button></fieldset></form>'
     )

@@ -81,7 +81,8 @@ def _organigramme():
     if not lignes:
         return (
             "<p>L’organigramme n’est pas encore publié. "
-            "L’administrateur le construit dans l’espace de travail.</p>"
+            "Le ministre, le secrétaire général, le chef de cabinet ou un administrateur "
+            "le construit dans l’espace de travail.</p>"
         )
     enfants = {}
     for ligne in lignes:

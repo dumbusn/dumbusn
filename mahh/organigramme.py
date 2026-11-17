@@ -1,12 +1,21 @@
-"""Organigramme des directions et attributions, tenus par l’administrateur."""
+"""Organigramme des directions et attributions.
+
+Les entités se créent depuis la racine, avec un code, un rôle et un rattachement.
+Le ministre, le secrétaire général, le chef de cabinet ou un administrateur
+tiennent cet organigramme. L’affectation donne à la personne le rôle de l’entité.
+"""
+
+import re
 
 from mahh.db import base
-from mahh.droits import FONCTIONS, exiger_admin
+from mahh.droits import FONCTIONS, exiger_admin, exiger_organigramme, peut_tenir_organigramme
 from mahh.presentation import jeton_cache
 from mahh.reponse import ValeurRefusee
 from mahh.securite import maintenant, url_sure
 from mahh.texte import echapper
 from mahh.validation import ligne
+
+_ROLES_MINISTERE = ("ministre", "secretaire_general", "chef_cabinet")
 
 
 def rendu_organigramme(ctx, conn, noeud_id=None, edition=True):
@@ -16,16 +25,16 @@ def rendu_organigramme(ctx, conn, noeud_id=None, edition=True):
     if not schema:
         schema = '<p class="vide">Aucune case dans cette branche.</p>'
     outils = ""
-    if ctx.utilisateur["administrateur"] and edition:
-        outils = _forme_organigramme(ctx, postes)
-    elif ctx.utilisateur["administrateur"]:
+    if peut_tenir_organigramme(ctx.utilisateur) and edition:
+        outils = _forme_organigramme(ctx, conn, postes)
+    elif peut_tenir_organigramme(ctx.utilisateur):
         outils = '<p><a href="/directions">Modifier l’organigramme</a></p>'
     return (
         '<section data-fonction="organigramme">'
         "<h2>Organigramme</h2>"
-        '<p class="chapeau">Chaîne affichée : ministre, secrétaire général, chef de cabinet, '
-        "directeurs, chefs de division, chefs de section, chargés d’études. "
-        "L’administrateur crée les postes et les rattache par le menu. Ce n’est pas un texte figé.</p>"
+        '<p class="chapeau">Les entités se créent depuis la racine, puis se rattachent. '
+        "Le rôle choisi est celui de la personne affectée : elle ne voit ensuite "
+        "que ce que ce rôle autorise.</p>"
         f'<div class="schema" data-organigramme="1">{schema}</div>'
         f"{outils}"
         "</section>"
@@ -55,14 +64,15 @@ def rendu_attributions(ctx, conn, noeud_id=None):
 def action_creer_poste(ctx):
     from mahh.documents import page_directions
 
-    exiger_admin(ctx)
+    exiger_organigramme(ctx)
     try:
-        nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
+        code, nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
     except ValeurRefusee as exc:
         return page_directions(ctx, erreur=exc.message)
     with base() as conn:
         try:
             _verifier_parent(conn, parent_id, None)
+            _verifier_code(conn, code, None)
         except ValeurRefusee as exc:
             return page_directions(ctx, erreur=exc.message)
         if parent_id is None:
@@ -77,10 +87,11 @@ def action_creer_poste(ctx):
         quand = maintenant()
         conn.execute(
             """
-            INSERT INTO organigramme (parent_id, nom, intitule, ordre, niveau, cree_le, modifie_le)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO organigramme (
+                parent_id, code, nom, intitule, ordre, niveau, cree_le, modifie_le
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (parent_id, nom, intitule, ordre, niveau, quand, quand),
+            (parent_id, code, nom, intitule, ordre, niveau, quand, quand),
         )
     return _retour(ctx, "poste-cree")
 
@@ -88,9 +99,9 @@ def action_creer_poste(ctx):
 def action_modifier_poste(ctx, poste_id):
     from mahh.documents import page_directions
 
-    exiger_admin(ctx)
+    exiger_organigramme(ctx)
     try:
-        nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
+        code, nom, intitule, parent_id, niveau = _saisie_poste(ctx.formulaire)
     except ValeurRefusee as exc:
         return page_directions(ctx, erreur=exc.message)
     with base() as conn:
@@ -99,15 +110,16 @@ def action_modifier_poste(ctx, poste_id):
             return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
         try:
             _verifier_parent(conn, parent_id, poste["id"])
+            _verifier_code(conn, code, poste["id"])
         except ValeurRefusee as exc:
             return page_directions(ctx, erreur=exc.message)
         conn.execute(
             """
             UPDATE organigramme
-            SET nom = ?, intitule = ?, parent_id = ?, niveau = ?, modifie_le = ?
+            SET code = ?, nom = ?, intitule = ?, parent_id = ?, niveau = ?, modifie_le = ?
             WHERE id = ?
             """,
-            (nom, intitule, parent_id, niveau, maintenant(), poste["id"]),
+            (code, nom, intitule, parent_id, niveau, maintenant(), poste["id"]),
         )
     return _retour(ctx, "poste-modifie")
 
@@ -115,7 +127,7 @@ def action_modifier_poste(ctx, poste_id):
 def action_retirer_poste(ctx, poste_id):
     from mahh.documents import page_directions
 
-    exiger_admin(ctx)
+    exiger_organigramme(ctx)
     with base() as conn:
         poste = _poste(conn, poste_id)
         if poste is None:
@@ -125,8 +137,83 @@ def action_retirer_poste(ctx, poste_id):
                 ctx,
                 erreur="Cette case est une direction du ministère. Retirez seulement une case ajoutée.",
             )
+        enfants = conn.execute(
+            "SELECT COUNT(*) AS n FROM organigramme WHERE parent_id = ?",
+            (poste["id"],),
+        ).fetchone()["n"]
+        agents = conn.execute(
+            "SELECT COUNT(*) AS n FROM utilisateur WHERE organigramme_id = ?",
+            (poste["id"],),
+        ).fetchone()["n"]
+        if enfants or agents:
+            return page_directions(
+                ctx,
+                erreur="Cette entité a encore des rattachements ou des personnes. Retirez-les d’abord.",
+            )
         conn.execute("DELETE FROM organigramme WHERE id = ?", (poste["id"],))
     return _retour(ctx, "poste-retire")
+
+
+def action_affecter(ctx, poste_id):
+    from mahh.documents import page_directions
+
+    exiger_organigramme(ctx)
+    try:
+        utilisateur_id = int((ctx.formulaire.get("utilisateur_id") or "").strip())
+    except ValueError:
+        return page_directions(ctx, erreur="Choisissez une personne.")
+    with base() as conn:
+        poste = _poste(conn, poste_id)
+        if poste is None:
+            return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
+        if (poste["niveau"] or "") not in _niveaux_poste():
+            return page_directions(ctx, erreur="Choisissez d’abord un rôle pour cette entité.")
+        personne = conn.execute(
+            "SELECT id FROM utilisateur WHERE id = ? AND actif = 1",
+            (utilisateur_id,),
+        ).fetchone()
+        if personne is None:
+            return page_directions(ctx, erreur="Cette personne n’est pas dans l’annuaire.")
+        structure_id = None
+        if poste["niveau"] not in _ROLES_MINISTERE:
+            structure_id = _structure_du_poste(conn, poste)
+            if structure_id is None:
+                return page_directions(
+                    ctx,
+                    erreur="Rattachez cette entité à une direction avant d’y affecter une personne.",
+                )
+        conn.execute(
+            """
+            UPDATE utilisateur
+            SET fonction = ?, structure_id = ?, organigramme_id = ?
+            WHERE id = ?
+            """,
+            (poste["niveau"], structure_id, poste["id"], personne["id"]),
+        )
+    return _retour(ctx, "personne-affectee")
+
+
+def action_desaffecter(ctx, poste_id):
+    from mahh.documents import page_directions
+
+    exiger_organigramme(ctx)
+    try:
+        utilisateur_id = int((ctx.formulaire.get("utilisateur_id") or "").strip())
+    except ValueError:
+        return page_directions(ctx, erreur="Choisissez une personne.")
+    with base() as conn:
+        poste = _poste(conn, poste_id)
+        if poste is None:
+            return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
+        conn.execute(
+            """
+            UPDATE utilisateur
+            SET fonction = '', structure_id = NULL, organigramme_id = NULL
+            WHERE id = ? AND organigramme_id = ? AND administrateur = 0
+            """,
+            (utilisateur_id, poste["id"]),
+        )
+    return _retour(ctx, "personne-retiree")
 
 
 def action_creer_attribution(ctx):
@@ -194,19 +281,46 @@ def _retour(ctx, message):
 
 
 def _saisie_poste(formulaire):
+    code = (formulaire.get("code") or "").strip().upper()
+    if code and re.fullmatch(r"[A-Z0-9][A-Z0-9-]{0,19}", code) is None:
+        raise ValeurRefusee("Le code ne contient que des lettres, des chiffres et le tiret.")
     nom = ligne(formulaire.get("nom"), 2, 120, "Nom")
     brut = (formulaire.get("intitule") or "").strip()
     intitule = ligne(brut, 2, 200, "Intitulé") if brut else ""
     niveau = (formulaire.get("niveau") or "").strip()
     if niveau and niveau not in _niveaux_poste():
-        raise ValeurRefusee("Ce niveau n’est pas dans la chaîne.")
+        raise ValeurRefusee("Ce rôle n’est pas parmi les niveaux prévus.")
     parent = (formulaire.get("parent_id") or "").strip()
     if not parent:
-        return nom, intitule, None, niveau
+        return code, nom, intitule, None, niveau
     try:
-        return nom, intitule, int(parent), niveau
+        return code, nom, intitule, int(parent), niveau
     except ValueError as exc:
         raise ValeurRefusee("Le rattachement n’est pas reconnu.") from exc
+
+
+def _verifier_code(conn, code, poste_id):
+    if not code:
+        return
+    autre = conn.execute(
+        "SELECT id FROM organigramme WHERE code = ? AND id != ?",
+        (code, poste_id or 0),
+    ).fetchone()
+    if autre:
+        raise ValeurRefusee("Ce code est déjà utilisé.")
+
+
+def _structure_du_poste(conn, poste):
+    courant = poste
+    garde = 0
+    while courant is not None and garde < 40:
+        if courant["noeud_id"] and _est_structure(conn, courant["noeud_id"]):
+            return courant["noeud_id"]
+        if courant["parent_id"] is None:
+            break
+        courant = _poste(conn, courant["parent_id"])
+        garde += 1
+    return None
 
 
 def _niveaux_poste():
@@ -360,11 +474,16 @@ def _branche(poste, enfants):
     intitule = (
         f'<p class="intitule">{echapper(poste["intitule"])}</p>' if poste["intitule"] else ""
     )
+    code = ""
+    if poste["code"]:
+        code = f'<span class="code">{echapper(poste["code"])}</span> '
     classe = "boite boite-racine" if poste["parent_id"] is None else "boite"
+    attribut_code = f' data-code="{echapper(poste["code"])}"' if poste["code"] else ""
     return (
         '<div class="branche">'
-        f'<div class="{classe}" data-poste="{int(poste["id"])}" data-nom="{echapper(poste["nom"])}">'
-        f"{nom}{intitule}</div>{dessous}</div>"
+        f'<div class="{classe}" data-poste="{int(poste["id"])}" data-nom="{echapper(poste["nom"])}"'
+        f"{attribut_code}>"
+        f"{code}{nom}{intitule}</div>{dessous}</div>"
     )
 
 
@@ -423,8 +542,15 @@ def _ligne_attribution(ctx, attribution):
     )
 
 
-def _forme_organigramme(ctx, postes):
-    options = '<option value="">Au premier rang</option>' + "".join(
+def _forme_organigramme(ctx, conn, postes):
+    personnes = conn.execute(
+        """
+        SELECT id, identifiant, nom, organigramme_id
+        FROM utilisateur WHERE actif = 1
+        ORDER BY nom, identifiant
+        """
+    ).fetchall()
+    options = '<option value="">Racine (aucun parent)</option>' + "".join(
         f'<option value="{int(poste["id"])}">{echapper(_chemin(poste, postes))}</option>'
         for poste in postes
     )
@@ -432,21 +558,25 @@ def _forme_organigramme(ctx, postes):
         '<form method="post" action="/organigramme" class="formulaire" data-creation="organigramme">'
         f"{jeton_cache(ctx)}"
         '<input type="hidden" name="retour" value="/directions">'
-        '<label for="nom-poste">Nom de la case</label>'
+        '<label for="code-poste">Code</label>'
+        '<input id="code-poste" name="code" maxlength="20" autocomplete="off">'
+        '<label for="nom-poste">Nom de l’entité</label>'
         '<input id="nom-poste" name="nom" maxlength="120" required>'
         '<label for="intitule-poste">Intitulé</label>'
         '<input id="intitule-poste" name="intitule" maxlength="200">'
-        '<label for="niveau-poste">Niveau dans la chaîne</label>'
+        '<label for="niveau-poste">Rôle</label>'
         f'<select id="niveau-poste" name="niveau">{_options_niveaux("")}</select>'
         '<label for="parent-poste">Rattachement</label>'
         f'<select id="parent-poste" name="parent_id">{options}</select>'
-        '<button type="submit">Ajouter la case</button></form>'
+        '<p class="aide">Sans rattachement, l’entité est à la racine. '
+        "Le rôle est un des niveaux du ministère. L’affectation l’applique à la personne.</p>"
+        '<button type="submit">Créer l’entité</button></form>'
     )
     lignes = []
     for poste in postes:
         identifiant = int(poste["id"])
         interdits = _descendants(poste["id"], postes) | {poste["id"]}
-        choix = '<option value="">Au premier rang</option>' + "".join(
+        choix = '<option value="">Racine (aucun parent)</option>' + "".join(
             f'<option value="{int(autre["id"])}"'
             f'{" selected" if autre["id"] == poste["parent_id"] else ""}>'
             f'{echapper(_chemin(autre, postes))}</option>'
@@ -465,20 +595,68 @@ def _forme_organigramme(ctx, postes):
             f'<form method="post" action="/organigramme/{identifiant}" class="formulaire" data-poste="{identifiant}">'
             f"{jeton_cache(ctx)}"
             '<input type="hidden" name="retour" value="/directions">'
+            f'<label for="code-{identifiant}">Code</label>'
+            f'<input id="code-{identifiant}" name="code" maxlength="20" value="{echapper(poste["code"] or "")}">'
             f'<label for="nom-{identifiant}">Nom</label>'
             f'<input id="nom-{identifiant}" name="nom" maxlength="120" required value="{echapper(poste["nom"])}">'
             f'<label for="intitule-{identifiant}">Intitulé</label>'
             f'<input id="intitule-{identifiant}" name="intitule" maxlength="200" value="{echapper(poste["intitule"])}">'
-            f'<label for="niveau-{identifiant}">Niveau dans la chaîne</label>'
+            f'<label for="niveau-{identifiant}">Rôle</label>'
             f'<select id="niveau-{identifiant}" name="niveau">{_options_niveaux(poste["niveau"] or "")}</select>'
             f'<label for="parent-{identifiant}">Rattachement</label>'
             f'<select id="parent-{identifiant}" name="parent_id">{choix}</select>'
             '<button type="submit">Enregistrer</button></form>'
+            f"{_forme_affectation(ctx, poste, personnes)}"
             f"{retrait}"
         )
+    sans_entite = [
+        personne for personne in personnes if not personne["organigramme_id"]
+    ]
+    orphelins = ""
+    if sans_entite:
+        noms = "".join(
+            f'<li data-sans-entite="{echapper(personne["identifiant"])}">'
+            f'{echapper(personne["nom"])}</li>'
+            for personne in sans_entite
+        )
+        orphelins = f"<h3>Personnes sans entité</h3><ul>{noms}</ul>"
     return (
         '<section class="outils"><h2>Construire l’organigramme</h2>'
-        f"{ajout}<h3>Modifier les cases</h3>{''.join(lignes)}</section>"
+        f"{ajout}<h3>Modifier les entités</h3>{''.join(lignes)}{orphelins}</section>"
+    )
+
+
+def _forme_affectation(ctx, poste, personnes):
+    identifiant = int(poste["id"])
+    membres = [personne for personne in personnes if personne["organigramme_id"] == poste["id"]]
+    liste = "".join(
+        "<li>"
+        f'<span data-affecte="{echapper(personne["identifiant"])}">{echapper(personne["nom"])}</span>'
+        f'<form method="post" action="/organigramme/{identifiant}/desaffecter" class="ligne-form">'
+        f"{jeton_cache(ctx)}"
+        '<input type="hidden" name="retour" value="/directions">'
+        f'<input type="hidden" name="utilisateur_id" value="{int(personne["id"])}">'
+        '<button type="submit" class="danger">Retirer</button></form>'
+        "</li>"
+        for personne in membres
+    )
+    if not liste:
+        liste = '<li class="vide">Personne affectée.</li>'
+    choix = "".join(
+        f'<option value="{int(personne["id"])}" data-identifiant="{echapper(personne["identifiant"])}">'
+        f'{echapper(personne["nom"])}</option>'
+        for personne in personnes
+        if personne["organigramme_id"] != poste["id"]
+    )
+    return (
+        f'<div class="affectations" data-affectations="{identifiant}">'
+        f"<h4>Personnes</h4><ul>{liste}</ul>"
+        f'<form method="post" action="/organigramme/{identifiant}/affecter" class="ligne-form">'
+        f"{jeton_cache(ctx)}"
+        '<input type="hidden" name="retour" value="/directions">'
+        f'<label for="personne-{identifiant}">Affecter</label>'
+        f'<select id="personne-{identifiant}" name="utilisateur_id">{choix}</select>'
+        '<button type="submit">Affecter</button></form></div>'
     )
 
 
@@ -511,7 +689,7 @@ def _chemin(poste, postes):
     noms = [poste["nom"]]
     courant = poste["parent_id"]
     garde = 0
-    while courant and garde < 12:
+    while courant and garde < 40:
         parent = par_id.get(courant)
         if parent is None:
             break

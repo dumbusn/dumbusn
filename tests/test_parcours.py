@@ -253,6 +253,75 @@ def parcours(hote, numero):
         },
     )
     verifie('data-nom="Inspection générale"' in schema, "case modifiée")
+    _, _, page_users, _ = admin.appel("GET", "/utilisateurs")
+    admin.appel(
+        "POST",
+        "/utilisateurs",
+        {
+            "identifiant": "etudes",
+            "nom": "Charge etudes",
+            "mot_de_passe": "etudes-2026xx",
+            "jeton": jeton(page_users),
+        },
+    )
+    _, _, schema, _ = admin.appel(
+        "POST",
+        "/organigramme",
+        {
+            "code": "RACINE",
+            "nom": "Cellule de suivi",
+            "retour": "/directions",
+            "jeton": jeton(schema),
+        },
+    )
+    verifie('data-code="RACINE"' in schema and 'data-nom="Cellule de suivi"' in schema, "entité à la racine")
+    _, _, schema, _ = admin.appel(
+        "POST",
+        "/organigramme",
+        {
+            "code": "ETU",
+            "nom": "Etudes ANASP",
+            "niveau": "charge_etudes",
+            "parent_id": anasp_poste.group(1),
+            "retour": "/directions",
+            "jeton": jeton(schema),
+        },
+    )
+    verifie('data-code="ETU"' in schema, "entité rattachée avec un rôle")
+    etudes_poste = re.search(r'data-poste="(\d+)" data-nom="Etudes ANASP"', schema)
+    verifie(etudes_poste is not None, "case études")
+    personne = re.search(r'value="(\d+)" data-identifiant="etudes"', schema)
+    verifie(personne is not None, "personne proposée à l’affectation")
+    _, _, schema, _ = admin.appel(
+        "POST",
+        f"/organigramme/{etudes_poste.group(1)}/affecter",
+        {
+            "utilisateur_id": personne.group(1),
+            "retour": "/directions",
+            "jeton": jeton(schema),
+        },
+    )
+    verifie('data-affecte="etudes"' in schema, "personne affectée, le rôle vient de l’entité")
+    etudes = Client(hote, numero)
+    _, _, formulaire, _ = etudes.appel("GET", "/connexion")
+    _, _, accueil_etudes, _ = etudes.appel(
+        "POST",
+        "/connexion",
+        {"identifiant": "etudes", "mot_de_passe": "etudes-2026xx", "jeton": jeton(formulaire)},
+    )
+    verifie(
+        _menu_contient(accueil_etudes, ("/directions", "/ordures")),
+        "le chargé d’études voit sa direction",
+    )
+    verifie(
+        "/eau/seg" not in _nav(accueil_etudes)
+        and "/eau/snape" not in _nav(accueil_etudes)
+        and "/journal" not in _nav(accueil_etudes),
+        "le chargé d’études ne voit pas le reste du ministère",
+    )
+    _, _, ses_cases, _ = etudes.appel("GET", "/directions")
+    verifie("Construire l’organigramme" not in ses_cases, "le chargé d’études ne tient pas l’organigramme")
+    verifie('data-nom="ANASP"' in ses_cases and 'data-nom="SEG"' not in ses_cases, "périmètre de sa direction")
     _, _, schema, _ = admin.appel(
         "POST",
         "/attribution",
@@ -283,6 +352,30 @@ def parcours(hote, numero):
     )
     verifie(statut == 200 and "Dossier ouvert" in page, "dossier créé")
     ouvert = re.search(r"/noeud/(\d+)", chemin).group(1)
+    _, _, page_ouvert, _ = admin.appel("GET", f"/noeud/{ouvert}")
+    verifie("Tout type de fichier" in page_ouvert and "100&nbsp;Mo" in page_ouvert, "tout fichier, 100 Mo")
+    verifie("15&nbsp;Mo" not in page_ouvert, "plus de plafond à 15 Mo")
+    statut, chemin_sous, page_sous, _ = admin.appel(
+        "POST",
+        f"/noeud/{ouvert}/dossier",
+        {"nom": "Sous-dossier", "jeton": jeton(page_ouvert)},
+    )
+    verifie(statut == 200 and "Sous-dossier" in page_sous, "sous-dossier")
+    sous = re.search(r"/noeud/(\d+)", chemin_sous).group(1)
+    _, _, page_sous, _ = admin.appel("GET", f"/noeud/{sous}")
+    statut, chemin_bas, page_bas, _ = admin.appel(
+        "POST",
+        f"/noeud/{sous}/dossier",
+        {"nom": "Sous-sous-dossier", "jeton": jeton(page_sous)},
+    )
+    verifie(statut == 200 and "Sous-sous-dossier" in page_bas, "sous-sous-dossier")
+    bas = re.search(r"/noeud/(\d+)", chemin_bas).group(1)
+    _, _, page_bas, _ = admin.appel("GET", f"/noeud/{bas}")
+    corps, type_contenu = fichier_multipart({"jeton": jeton(page_bas)}, "archive.xyz", b"contenu libre")
+    statut, _, apres, _ = admin.appel(
+        "POST", f"/noeud/{bas}/fichier", fichier=(corps, type_contenu)
+    )
+    verifie(statut == 200 and "archive.xyz" in apres, "type de fichier libre")
     _, _, page_anasp, _ = admin.appel("GET", f"/noeud/{anasp.group(1)}")
     _, chemin_ferme, _, _ = admin.appel(
         "POST",
@@ -605,6 +698,11 @@ def parcours(hote, numero):
     verifie(
         _menu_contient(accueil_ministre, ("/directions", "/bsd", "/ordures", "/eau/seg", "/eau/snape")),
         "le ministre voit tout le ministère",
+    )
+    _, _, directions_ministre, _ = ministre.appel("GET", "/directions")
+    verifie(
+        "Construire l’organigramme" in directions_ministre and "Racine (aucun parent)" in directions_ministre,
+        "le ministre tient l’organigramme",
     )
     _, _, saisie, _ = admin.appel("GET", "/bsd/saisie")
     _, chemin, _, _ = admin.appel(

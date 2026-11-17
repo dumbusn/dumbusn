@@ -31,6 +31,25 @@ def exiger_admin(ctx):
         raise Interdit("Cette page est réservée à l’administrateur.")
 
 
+def peut_tenir_organigramme(utilisateur):
+    """Le modèle MIYAH réserve l’organigramme au DG, au DGA et à l’IT.
+    Ici : ministre, secrétaire général, chef de cabinet, ou administrateur."""
+    if not utilisateur:
+        return False
+    if utilisateur["administrateur"]:
+        return True
+    return (utilisateur["fonction"] or "") in ("ministre", "secretaire_general", "chef_cabinet")
+
+
+def exiger_organigramme(ctx):
+    exiger_connexion(ctx)
+    if not peut_tenir_organigramme(ctx.utilisateur):
+        raise Interdit(
+            "L’organigramme est tenu par le ministre, le secrétaire général, "
+            "le chef de cabinet, ou un administrateur."
+        )
+
+
 def vide():
     return {action: False for action in ACTIONS}
 

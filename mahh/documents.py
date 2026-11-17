@@ -19,12 +19,17 @@ from mahh.securite import maintenant
 from mahh.texte import echapper
 from mahh.validation import nom_noeud
 
-EXTENSIONS = {
-    ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".csv",
-    ".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods",
-}
-TAILLE_MAX = 15 * 1024 * 1024
-_STOCKAGE = re.compile(r"[a-f0-9]{32}\.[a-z0-9]{1,8}")
+TAILLE_MAX = 100 * 1024 * 1024
+MESSAGE_TAILLE = "Le fichier dépasse 100 Mo."
+_SUFFIXE = re.compile(r"^\.[a-z0-9]{1,16}$")
+_STOCKAGE = re.compile(r"[a-f0-9]{32}(\.[a-z0-9]{1,16})?")
+
+
+def suffixe_stockage(nom):
+    brut = Path(str(nom)).suffix.lower()
+    if _SUFFIXE.fullmatch(brut):
+        return brut
+    return ""
 
 
 def _noeud(conn, noeud_id):
@@ -42,7 +47,7 @@ def _fil(conn, noeud):
     chaine = []
     courant = noeud
     garde = 0
-    while courant is not None and garde < 30:
+    while courant is not None and garde < 200:
         chaine.append(courant)
         if courant["parent_id"] is None:
             break
@@ -88,18 +93,6 @@ def _visible(conn, utilisateur, noeud):
     return any(
         a_un_privilege(effectifs(conn, utilisateur, ligne["id"])) for ligne in descendants
     )
-
-
-def _profondeur(conn, noeud_id):
-    profondeur = 0
-    courant = noeud_id
-    while courant is not None and profondeur < 30:
-        ligne = conn.execute("SELECT parent_id FROM noeud WHERE id = ?", (courant,)).fetchone()
-        if ligne is None:
-            break
-        courant = ligne["parent_id"]
-        profondeur += 1
-    return profondeur
 
 
 def _lien_fil(conn, utilisateur, noeud):
@@ -312,7 +305,7 @@ def _corps_noeud(ctx, conn, noeud, droits, fil, enfants, libelles):
             f"{jeton_cache(ctx)}"
             '<label for="fichier">Fichier</label>'
             '<input id="fichier" name="fichier" type="file" required>'
-            "<p class=\"aide\">PDF, image, texte, CSV ou document bureautique. 15&nbsp;Mo au plus.</p>"
+            "<p class=\"aide\">Tout type de fichier. 100&nbsp;Mo au plus.</p>"
             '<button type="submit">Déposer le fichier</button></form></section>'
         )
     return entete + catalogue + "<h2>Dossiers et fichiers</h2>" + liste + formulaires
@@ -326,8 +319,6 @@ def action_dossier(ctx, noeud_id):
         return page_noeud(ctx, noeud_id, erreur=exc.message)
     with base() as conn:
         parent = _exiger_parent_creation(conn, ctx, noeud_id)
-        if _profondeur(conn, parent["id"]) >= 12:
-            return page_noeud(ctx, noeud_id, erreur="Ce dossier est déjà trop profond.")
         if conn.execute(
             "SELECT id FROM noeud WHERE parent_id = ? AND nom = ?",
             (parent["id"], nom),
@@ -358,11 +349,10 @@ def action_fichier(ctx, noeud_id):
     if not contenu:
         return page_noeud(ctx, noeud_id, erreur="Le fichier est vide.")
     if len(contenu) > TAILLE_MAX:
-        return page_noeud(ctx, noeud_id, erreur="Le fichier dépasse 15 Mo.")
-    suffixe = Path(nom).suffix.lower()
+        return page_noeud(ctx, noeud_id, erreur=MESSAGE_TAILLE)
     from secrets import token_hex
 
-    stockage = token_hex(16) + suffixe
+    stockage = token_hex(16) + suffixe_stockage(nom)
     with base() as conn:
         parent = _exiger_parent_creation(conn, ctx, noeud_id)
         if conn.execute(
@@ -476,11 +466,6 @@ def _nom_fichier(nom_original):
         raise ValeurRefusee("Le fichier n’a pas de nom.")
     if any(ord(caractere) < 32 for caractere in base):
         raise ValeurRefusee("Le nom du fichier contient un caractère refusé.")
-    suffixe = Path(base).suffix.lower()
-    if suffixe not in EXTENSIONS:
-        raise ValeurRefusee(
-            "Ce type de fichier n’est pas accepté. Déposez un PDF, une image, un texte, un CSV ou un document bureautique."
-        )
     if len(base) > 120:
         base = base[-120:]
     return base

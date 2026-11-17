@@ -83,8 +83,10 @@ from mahh.documents import (
     telecharger,
 )
 from mahh.organigramme import (
+    action_affecter,
     action_creer_attribution,
     action_creer_poste,
+    action_desaffecter,
     action_modifier_attribution,
     action_modifier_poste,
     action_retirer_attribution,
@@ -148,6 +150,8 @@ ROUTES = (
     ("POST", re.compile(r"^/organigramme$"), action_creer_poste),
     ("POST", re.compile(r"^/organigramme/(\d+)$"), action_modifier_poste),
     ("POST", re.compile(r"^/organigramme/(\d+)/retirer$"), action_retirer_poste),
+    ("POST", re.compile(r"^/organigramme/(\d+)/affecter$"), action_affecter),
+    ("POST", re.compile(r"^/organigramme/(\d+)/desaffecter$"), action_desaffecter),
     ("POST", re.compile(r"^/attribution$"), action_creer_attribution),
     ("POST", re.compile(r"^/attribution/(\d+)$"), action_modifier_attribution),
     ("POST", re.compile(r"^/attribution/(\d+)/retirer$"), action_retirer_attribution),
@@ -409,7 +413,7 @@ def _lire_corps(handler):
         longueur = int(brut)
     except ValueError as exc:
         raise ValueError("longueur") from exc
-    if longueur < 0 or longueur > 16 * 1024 * 1024:
+    if longueur < 0 or longueur > 110 * 1024 * 1024:
         raise ValueError("taille")
     corps = handler.rfile.read(longueur) if longueur else b""
     type_contenu = handler.headers.get("Content-Type", "")

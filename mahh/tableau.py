@@ -15,7 +15,7 @@ from mahh.calculs import (
 )
 from mahh.config import repertoire_fichiers
 from mahh.db import base
-from mahh.documents import TAILLE_MAX, _chemin_stockage, _nom_fichier
+from mahh.documents import MESSAGE_TAILLE, TAILLE_MAX, _chemin_stockage, _nom_fichier, suffixe_stockage
 from mahh.droits import (
     est_hierarchie,
     exiger_admin,
@@ -246,8 +246,8 @@ def action_piece(ctx, projet_id):
             if not fichier[1]:
                 return page_projet(ctx, projet_id, erreur="Le fichier est vide.")
             if len(fichier[1]) > TAILLE_MAX:
-                return page_projet(ctx, projet_id, erreur="Le fichier dépasse 15 Mo.")
-            stockage = token_hex(16) + Path(nom_fichier).suffix.lower()
+                return page_projet(ctx, projet_id, erreur=MESSAGE_TAILLE)
+            stockage = token_hex(16) + suffixe_stockage(nom_fichier)
         conn.execute(
             """
             INSERT INTO piece (
