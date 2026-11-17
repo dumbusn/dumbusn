@@ -320,7 +320,7 @@ def parcours(hote, numero):
         "le chargé d’études ne voit pas le reste du ministère",
     )
     _, _, ses_cases, _ = etudes.appel("GET", "/directions")
-    verifie("Construire l’organigramme" not in ses_cases, "le chargé d’études ne tient pas l’organigramme")
+    verifie("Nouvelle entité racine" not in ses_cases, "le chargé d’études ne tient pas l’organigramme")
     verifie('data-nom="ANASP"' in ses_cases and 'data-nom="SEG"' not in ses_cases, "périmètre de sa direction")
     _, _, schema, _ = admin.appel(
         "POST",
@@ -604,8 +604,8 @@ def parcours(hote, numero):
         "chaîne des niveaux",
     )
     verifie("Secrétaire général" in page_users and "Chargé d’études" in page_users, "libellés des niveaux")
-    verifie("Direction rattachée" in page_users and 'label="Assainissement"' in page_users, "directions groupées")
-    verifie("Nouveau compte" in page_users, "écran de création")
+    verifie("Nouvel agent" in page_users and "Département / Service" in page_users, "annuaire")
+    verifie("Ajouter un rôle" in page_users, "rôles de l’agent")
     _, _, sans_direction, _ = admin.appel(
         "POST",
         "/utilisateurs",
@@ -701,8 +701,8 @@ def parcours(hote, numero):
     )
     _, _, directions_ministre, _ = ministre.appel("GET", "/directions")
     verifie(
-        "Construire l’organigramme" in directions_ministre and "Racine (aucun parent)" in directions_ministre,
-        "le ministre tient l’organigramme",
+        "Nouvelle entité racine" in directions_ministre and "— Racine —" in directions_ministre,
+        "le ministre crée une entité depuis la racine",
     )
     _, _, saisie, _ = admin.appel("GET", "/bsd/saisie")
     _, chemin, _, _ = admin.appel(
@@ -749,7 +749,7 @@ def parcours(hote, numero):
     verifie('data-nom="DGA"' not in ses_directions and 'data-nom="SEG"' not in ses_directions, "pas les autres")
     verifie("Organiser la salubrité des communes" in ses_directions, "son menu d’attributions")
     verifie("Inspection générale" in ses_directions, "la case ajoutée sous sa direction")
-    verifie("Construire l’organigramme" not in ses_directions, "l’outil reste à l’administrateur")
+    verifie("Nouvelle entité racine" not in ses_directions, "l’outil reste à l’administrateur")
     _, _, compte, _ = direction.appel("GET", "/compte")
     statut, _, _, _ = direction.appel(
         "POST",

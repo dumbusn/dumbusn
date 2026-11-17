@@ -31,14 +31,25 @@ def exiger_admin(ctx):
         raise Interdit("Cette page est réservée à l’administrateur.")
 
 
+def roles_du_compte(utilisateur):
+    if not utilisateur:
+        return set()
+    roles = set()
+    if utilisateur["fonction"]:
+        roles.add(utilisateur["fonction"])
+    if "roles" in utilisateur.keys() and utilisateur["roles"]:
+        roles.update(utilisateur["roles"].split())
+    return roles
+
+
 def peut_tenir_organigramme(utilisateur):
-    """Le modèle MIYAH réserve l’organigramme au DG, au DGA et à l’IT.
-    Ici : ministre, secrétaire général, chef de cabinet, ou administrateur."""
+    """Là où le modèle dit DG, DGA et IT : ministre, secrétaire général,
+    chef de cabinet, ou administrateur."""
     if not utilisateur:
         return False
     if utilisateur["administrateur"]:
         return True
-    return (utilisateur["fonction"] or "") in ("ministre", "secretaire_general", "chef_cabinet")
+    return bool(roles_du_compte(utilisateur) & {"ministre", "secretaire_general", "chef_cabinet"})
 
 
 def exiger_organigramme(ctx):
@@ -63,7 +74,7 @@ def est_hierarchie(utilisateur):
         return False
     if utilisateur["administrateur"]:
         return True
-    return (utilisateur["fonction"] or "") in ACCES_COMPLET
+    return bool(roles_du_compte(utilisateur) & set(ACCES_COMPLET))
 
 
 def peut_gerer_vitrine(utilisateur):
@@ -72,7 +83,7 @@ def peut_gerer_vitrine(utilisateur):
         return False
     if est_hierarchie(utilisateur):
         return True
-    return (utilisateur["fonction"] or "") == FONCTION_COMMUNICATION
+    return FONCTION_COMMUNICATION in roles_du_compte(utilisateur)
 
 
 def dans_perimetre(conn, noeud_id, structure_id):
@@ -218,6 +229,8 @@ def entrees_menu(conn, utilisateur):
     if utilisateur is None:
         return []
     entrees = [("/", "Accueil", "accueil")]
+    if peut_voir_directions(conn, utilisateur) or peut_tenir_organigramme(utilisateur):
+        entrees.append(("/organigramme", "Organigramme", "organigramme"))
     if peut_voir_directions(conn, utilisateur):
         entrees.append(("/directions", "Directions", "directions"))
     if peut_voir_bsd(conn, utilisateur):
@@ -232,9 +245,10 @@ def entrees_menu(conn, utilisateur):
         entrees.append(("/eau/snape", "SNAPE", "snape"))
     if peut_gerer_vitrine(utilisateur):
         entrees.append(("/communication", "Communication", "communication"))
+    if peut_tenir_organigramme(utilisateur):
+        entrees.append(("/annuaire", "Annuaire", "annuaire"))
     if utilisateur["administrateur"]:
         entrees.append(("/groupes", "Groupes", "groupes"))
-        entrees.append(("/utilisateurs", "Utilisateurs", "utilisateurs"))
         entrees.append(("/journal", "Journal", "journal"))
     if (
         est_hierarchie(utilisateur)

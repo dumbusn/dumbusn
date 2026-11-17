@@ -84,6 +84,8 @@ from mahh.documents import (
 )
 from mahh.organigramme import (
     action_affecter,
+    action_affecter_liste,
+    page_organigramme,
     action_creer_attribution,
     action_creer_poste,
     action_desaffecter,
@@ -147,7 +149,9 @@ ROUTES = (
     ("POST", re.compile(r"^/connexion$"), action_connexion),
     ("POST", re.compile(r"^/deconnexion$"), action_deconnexion),
     ("GET", re.compile(r"^/directions$"), page_directions),
+    ("GET", re.compile(r"^/organigramme$"), page_organigramme),
     ("POST", re.compile(r"^/organigramme$"), action_creer_poste),
+    ("POST", re.compile(r"^/organigramme/affecter$"), action_affecter_liste),
     ("POST", re.compile(r"^/organigramme/(\d+)$"), action_modifier_poste),
     ("POST", re.compile(r"^/organigramme/(\d+)/retirer$"), action_retirer_poste),
     ("POST", re.compile(r"^/organigramme/(\d+)/affecter$"), action_affecter),
@@ -168,6 +172,7 @@ ROUTES = (
     ("POST", re.compile(r"^/groupes/(\d+)/retirer$"), action_retirer),
     ("POST", re.compile(r"^/groupes/(\d+)/droit$"), action_droit),
     ("POST", re.compile(r"^/groupes/(\d+)/bsd$"), action_bsd),
+    ("GET", re.compile(r"^/annuaire$"), page_utilisateurs),
     ("GET", re.compile(r"^/utilisateurs$"), page_utilisateurs),
     ("POST", re.compile(r"^/utilisateurs$"), action_utilisateur),
     ("POST", re.compile(r"^/utilisateurs/(\d+)/desactiver$"), action_desactiver),

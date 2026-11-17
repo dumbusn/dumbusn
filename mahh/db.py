@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS utilisateur (
     actif INTEGER NOT NULL DEFAULT 1,
     courriel TEXT NOT NULL DEFAULT '',
     organigramme_id INTEGER,
+    matricule TEXT NOT NULL DEFAULT '',
+    telephone TEXT NOT NULL DEFAULT '',
+    intitule_poste TEXT NOT NULL DEFAULT '',
+    roles TEXT NOT NULL DEFAULT '',
     cree_le TEXT NOT NULL
 );
 
@@ -536,6 +540,14 @@ def migrer(conn):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN structure_id INTEGER")
     if "organigramme_id" not in colonnes("utilisateur"):
         conn.execute("ALTER TABLE utilisateur ADD COLUMN organigramme_id INTEGER")
+    for colonne, definition in (
+        ("matricule", "TEXT NOT NULL DEFAULT ''"),
+        ("telephone", "TEXT NOT NULL DEFAULT ''"),
+        ("intitule_poste", "TEXT NOT NULL DEFAULT ''"),
+        ("roles", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if colonne not in colonnes("utilisateur"):
+            conn.execute(f"ALTER TABLE utilisateur ADD COLUMN {colonne} {definition}")
     if "structure_id" not in colonnes("projet"):
         conn.execute("ALTER TABLE projet ADD COLUMN structure_id INTEGER")
     conn.execute(
