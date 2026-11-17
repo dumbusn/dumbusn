@@ -35,7 +35,7 @@ def rendu_organigramme(ctx, conn, noeud_id=None, edition=True, plein=False):
     tenir = bool(edition and peut_tenir_organigramme(ctx.utilisateur))
     arbre = _foret(ctx, racines, enfants, membres, tenir)
     if not arbre:
-        arbre = '<p class="vide">Aucune entité dans cette branche. Créez la première depuis la racine.</p>'
+        arbre = '<p class="vide">Aucune entité enregistrée.</p>'
     nombre = len(postes) if noeud_id is None else _compter_branche(racines, enfants)
     libelle = "1 entité" if nombre == 1 else f"{nombre} entités"
     outils = _dialogues(ctx, conn, postes, membres) if tenir else ""
@@ -58,6 +58,7 @@ def rendu_organigramme(ctx, conn, noeud_id=None, edition=True, plein=False):
         f"<h2>Arborescence ({libelle})</h2>"
         f'<ul class="arbre">{arbre}</ul>'
         "</section>"
+        f"{_sans_affectation(conn) if noeud_id is None else ''}"
         f"{outils}"
         "</section>"
     )
@@ -192,30 +193,27 @@ def action_affecter(ctx, poste_id):
         poste = _poste(conn, poste_id)
         if poste is None:
             return page_directions(ctx, erreur="Cette case n’est pas dans l’organigramme.")
-        if (poste["niveau"] or "") not in _niveaux_poste():
-            return page_directions(ctx, erreur="Choisissez d’abord un rôle pour cette entité.")
         personne = conn.execute(
-            "SELECT id FROM utilisateur WHERE id = ? AND actif = 1",
+            "SELECT id, fonction FROM utilisateur WHERE id = ? AND actif = 1",
             (utilisateur_id,),
         ).fetchone()
         if personne is None:
             return page_directions(ctx, erreur="Cette personne n’est pas dans l’annuaire.")
-        structure_id = None
-        if poste["niveau"] not in _ROLES_MINISTERE:
-            structure_id = _structure_du_poste(conn, poste)
-            if structure_id is None:
-                return page_directions(
-                    ctx,
-                    erreur="Rattachez cette entité à une direction avant d’y affecter une personne.",
-                )
-        conn.execute(
-            """
-            UPDATE utilisateur
-            SET fonction = ?, roles = ?, structure_id = ?, organigramme_id = ?
-            WHERE id = ?
-            """,
-            (poste["niveau"], poste["niveau"], structure_id, poste["id"], personne["id"]),
-        )
+        # Le modèle ne change que le rattachement. Le rôle reste celui de la fiche.
+        # Le périmètre de direction suit l’entité quand elle est sous une direction.
+        structure_id = _structure_du_poste(conn, poste)
+        if (personne["fonction"] or "") in _ROLES_MINISTERE:
+            structure_id = None
+        if structure_id is None:
+            conn.execute(
+                "UPDATE utilisateur SET organigramme_id = ? WHERE id = ?",
+                (poste["id"], personne["id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE utilisateur SET organigramme_id = ?, structure_id = ? WHERE id = ?",
+                (poste["id"], structure_id, personne["id"]),
+            )
     return _retour(ctx, "personne-affectee")
 
 
@@ -234,7 +232,7 @@ def action_desaffecter(ctx, poste_id):
         conn.execute(
             """
             UPDATE utilisateur
-            SET fonction = '', roles = '', structure_id = NULL, organigramme_id = NULL
+            SET organigramme_id = NULL
             WHERE id = ? AND organigramme_id = ? AND administrateur = 0
             """,
             (utilisateur_id, poste["id"]),
@@ -465,12 +463,16 @@ def _enfants(postes):
     groupes = {}
     for poste in postes:
         groupes.setdefault(poste["parent_id"], []).append(poste)
+    for liste in groupes.values():
+        liste.sort(key=lambda poste: (poste["ordre"], (poste["code"] or "").upper(), poste["nom"].upper()))
     return groupes
 
 
 def _racines(postes, noeud_id):
     if noeud_id is None:
-        return [poste for poste in postes if poste["parent_id"] is None]
+        racines = [poste for poste in postes if poste["parent_id"] is None]
+        racines.sort(key=lambda poste: (poste["ordre"], (poste["code"] or "").upper(), poste["nom"].upper()))
+        return racines
     ancre = next((poste for poste in postes if poste["noeud_id"] == noeud_id), None)
     if ancre is None:
         return []
@@ -528,7 +530,7 @@ def _ligne_entite(ctx, poste, enfants, membres, tenir, profondeur):
     if poste["niveau"]:
         attributs += f' data-niveau="{echapper(poste["niveau"])}"'
     compteur = (
-        f'<span class="compteur" title="{len(gens)}">{len(gens)}</span>'
+        f'<span class="compteur" title="{len(gens)}">{len(gens)}</span>' if gens else ""
     )
     actions = _actions_entite(ctx, poste) if tenir else ""
     etiquette = (
@@ -540,7 +542,7 @@ def _ligne_entite(ctx, poste, enfants, membres, tenir, profondeur):
             _ligne_entite(ctx, enfant, enfants, membres, tenir, profondeur + 1)
             for enfant in suite
         )
-        ouvert = " open" if profondeur < 2 else ""
+        ouvert = " open" if profondeur == 0 else ""
         return (
             f"<li><details{ouvert}><summary>{etiquette}</summary>"
             f"{actions}<ul class=\"arbre\">{dessous}</ul></details></li>"
@@ -553,14 +555,42 @@ def _actions_entite(ctx, poste):
     chemin = ctx.chemin if ctx.chemin in ("/organigramme", "/directions") else "/organigramme"
     retrait = ""
     if not poste["noeud_id"]:
-        retrait = f'<a class="danger-lien" href="{chemin}?retirer={identifiant}#retirer-entite">Retirer</a>'
+        retrait = f'<a class="danger-lien" href="{chemin}?retirer={identifiant}#retirer-entite" title="Supprimer">Supprimer</a>'
     return (
         '<span class="actions-entite">'
-        f'<a href="{chemin}?parent={identifiant}#nouvelle-entite">Sous-entité</a>'
-        f'<a href="/annuaire?entite={identifiant}#nouvel-agent">Ajouter un agent</a>'
-        f'<a href="{chemin}#affecter-compte">Compte existant</a>'
-        f'<a href="{chemin}?modifier={identifiant}#modifier-entite">Modifier</a>'
+        f'<a href="{chemin}?affecter={identifiant}#affecter-agent" title="Affecter des agents">Affecter</a>'
+        f'<a href="{chemin}?parent={identifiant}#nouvelle-entite" title="Sous-entité">Sous-entité</a>'
+        f'<a href="{chemin}?modifier={identifiant}#modifier-entite" title="Modifier">Modifier</a>'
         f"{retrait}</span>"
+    )
+
+
+def _sans_affectation(conn):
+    personnes = conn.execute(
+        """
+        SELECT nom, matricule FROM utilisateur
+        WHERE actif = 1 AND administrateur = 0 AND organigramme_id IS NULL
+        ORDER BY nom
+        """
+    ).fetchall()
+    if not personnes:
+        return ""
+    pastilles = "".join(
+        "<span class=\"pastille\">"
+        f"{echapper(personne['nom'])}"
+        + (
+            f" <span class=\"meta-agent\">· {echapper(personne['matricule'])}</span>"
+            if personne["matricule"]
+            else ""
+        )
+        + "</span>"
+        for personne in personnes
+    )
+    return (
+        '<section class="carte-arbre orphelins">'
+        f"<h2>Agents sans affectation ({len(personnes)})</h2>"
+        f'<p class="pastilles">{pastilles}</p>'
+        "</section>"
     )
 
 
@@ -569,10 +599,12 @@ def _dialogues(ctx, conn, postes, membres):
     parent_voulu = _entier(requete.get("parent"))
     modifier_id = _entier(requete.get("modifier"))
     retirer_id = _entier(requete.get("retirer"))
+    affecter_id = _entier(requete.get("affecter"))
     cible = next((poste for poste in postes if poste["id"] == modifier_id), None)
     personnes = conn.execute(
         """
-        SELECT id, identifiant, nom, organigramme_id
+        SELECT id, identifiant, nom, courriel, matricule, intitule_poste,
+               organigramme_id, administrateur
         FROM utilisateur WHERE actif = 1
         ORDER BY nom, identifiant
         """
@@ -581,6 +613,7 @@ def _dialogues(ctx, conn, postes, membres):
         f'<option value="{int(personne["id"])}" data-identifiant="{echapper(personne["identifiant"])}">'
         f'{echapper(personne["nom"])}</option>'
         for personne in personnes
+        if not personne["administrateur"]
     )
     retour = ctx.chemin if ctx.chemin in ("/organigramme", "/directions") else "/organigramme"
     creation = (
@@ -590,18 +623,14 @@ def _dialogues(ctx, conn, postes, membres):
         '<p class="chapeau">Direction, département ou service. Le code doit être unique.</p>'
         f"{jeton_cache(ctx)}"
         f'<input type="hidden" name="retour" value="{echapper(retour)}">'
-        '<div class="deux-champs">'
+        '<div class="deux-champs codes">'
         '<div class="champ"><label for="code-poste">Code *</label>'
-        '<input id="code-poste" name="code" maxlength="20" required autocomplete="off"></div>'
+        '<input id="code-poste" name="code" maxlength="20" required autocomplete="off" class="majuscules"></div>'
         '<div class="champ"><label for="nom-poste">Nom *</label>'
         '<input id="nom-poste" name="nom" maxlength="120" required></div>'
         "</div>"
         '<div class="champ"><label for="parent-poste">Rattachement</label>'
         f'<select id="parent-poste" name="parent_id">{_options_parents(postes, parent_voulu, set())}</select></div>'
-        '<div class="champ"><label for="niveau-poste">Rôle de l’entité</label>'
-        f'<select id="niveau-poste" name="niveau">{_options_niveaux("")}</select></div>'
-        '<p class="aide">Sans rattachement, l’entité est à la racine. '
-        "Le rôle de l’entité ouvre les écrans des personnes qui y sont affectées.</p>"
         '<p class="pied-dialogue"><a class="bouton secondaire" href="'
         f'{echapper(retour)}">Annuler</a><button type="submit">Créer</button></p>'
         "</form></div>"
@@ -610,7 +639,7 @@ def _dialogues(ctx, conn, postes, membres):
         cible = postes[0]
     edition = ""
     if cible is not None:
-        exclus = _descendants(cible["id"], postes) | {cible["id"]}
+        exclus = {cible["id"]}
         edition = (
             f'<div class="voile" id="modifier-entite"><form class="dialogue" method="post" '
             f'action="/organigramme/{int(cible["id"])}">'
@@ -618,41 +647,25 @@ def _dialogues(ctx, conn, postes, membres):
             "<h2>Modifier l’entité</h2>"
             f"{jeton_cache(ctx)}"
             f'<input type="hidden" name="retour" value="{echapper(retour)}">'
-            '<div class="deux-champs">'
+            '<div class="deux-champs codes">'
             '<div class="champ"><label for="code-modifier">Code *</label>'
-            f'<input id="code-modifier" name="code" maxlength="20" value="{echapper(cible["code"] or "")}"></div>'
+            f'<input id="code-modifier" name="code" maxlength="20" value="{echapper(cible["code"] or "")}" class="majuscules"></div>'
             '<div class="champ"><label for="nom-modifier">Nom *</label>'
             f'<input id="nom-modifier" name="nom" maxlength="120" required value="{echapper(cible["nom"])}"></div>'
             "</div>"
             '<div class="champ"><label for="parent-modifier">Rattachement</label>'
             f'<select id="parent-modifier" name="parent_id">'
             f'{_options_parents(postes, cible["parent_id"], exclus)}</select></div>'
-            '<div class="champ"><label for="niveau-modifier">Rôle de l’entité</label>'
-            f'<select id="niveau-modifier" name="niveau">{_options_niveaux(cible["niveau"] or "")}</select></div>'
+            f'<input type="hidden" name="niveau" value="{echapper(cible["niveau"] or "")}">'
             '<p class="pied-dialogue"><a class="bouton secondaire" href="'
             f'{echapper(retour)}">Annuler</a><button type="submit">Enregistrer</button></p>'
             "</form></div>"
         )
-    choix_entites = "".join(
-        f'<option value="{int(poste["id"])}">{echapper((poste["code"] + " · ") if poste["code"] else "")}'
-        f'{echapper(poste["nom"])}</option>'
-        for poste in postes
-    )
-    affectation = (
-        '<div class="voile" id="affecter-compte"><form class="dialogue" method="post" action="/organigramme/affecter">'
-        f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
-        "<h2>Affecter un compte</h2>"
-        '<p class="chapeau">La personne reçoit le rôle de l’entité.</p>'
-        f"{jeton_cache(ctx)}"
-        f'<input type="hidden" name="retour" value="{echapper(retour)}">'
-        '<label for="personne-existante">Personne</label>'
-        f'<select id="personne-existante" name="utilisateur_id">{choix_personnes}</select>'
-        '<label for="entite-affectation">Entité</label>'
-        f'<select id="entite-affectation" name="poste_id">{choix_entites}</select>'
-        '<p class="pied-dialogue"><a class="bouton secondaire" href="'
-        f'{echapper(retour)}">Annuler</a><button type="submit">Affecter</button></p>'
-        "</form></div>"
-    )
+    cible_aff = next((poste for poste in postes if poste["id"] == affecter_id), None)
+    if cible_aff is None and postes:
+        cible_aff = postes[0]
+    noms_entites = {poste["id"]: poste["nom"] for poste in postes}
+    affectation = _dialogue_affectation(ctx, cible_aff, personnes, noms_entites, retour, choix_personnes)
     retire = next((poste for poste in postes if poste["id"] == retirer_id and not poste["noeud_id"]), None)
     confirmation = ""
     if retire is not None:
@@ -660,16 +673,73 @@ def _dialogues(ctx, conn, postes, membres):
             f'<div class="voile" id="retirer-entite"><form class="dialogue" method="post" '
             f'action="/organigramme/{int(retire["id"])}/retirer">'
             f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
-            f'<h2>Retirer {echapper(retire["nom"])}</h2>'
-            "<p>L’entité est retirée si elle n’a plus de sous-entité ni de personne.</p>"
+            f"<h2>Supprimer « {echapper(retire['nom'])} » ?</h2>"
+            "<p>La suppression échouera si des sous-entités, des agents ou des documents y sont rattachés.</p>"
             f"{jeton_cache(ctx)}"
             f'<input type="hidden" name="retour" value="{echapper(retour)}">'
             '<p class="pied-dialogue"><a class="bouton secondaire" href="'
             f'{echapper(retour)}">Annuler</a>'
-            '<button type="submit" class="danger">Retirer</button></p>'
+            '<button type="submit" class="danger">Supprimer</button></p>'
             "</form></div>"
         )
     return creation + edition + affectation + confirmation
+
+
+def _dialogue_affectation(ctx, cible, personnes, noms_entites, retour, choix_personnes):
+    if cible is None:
+        return ""
+    identifiant = int(cible["id"])
+    membres = [
+        personne for personne in personnes
+        if personne["organigramme_id"] == cible["id"] and not personne["administrateur"]
+    ]
+    liste_membres = "".join(
+        "<li>"
+        f"<div><strong>{echapper(personne['nom'])}</strong>"
+        + (
+            f"<span class=\"meta-agent\">{echapper(personne['intitule_poste'])}</span>"
+            if personne["intitule_poste"]
+            else ""
+        )
+        + "</div>"
+        f'<form method="post" action="/organigramme/{identifiant}/desaffecter">'
+        f"{jeton_cache(ctx)}"
+        f'<input type="hidden" name="retour" value="{echapper(retour)}">'
+        f'<input type="hidden" name="utilisateur_id" value="{int(personne["id"])}">'
+        '<button type="submit" class="icone" title="Retirer">×</button></form></li>'
+        for personne in membres
+    ) or '<li class="vide">Aucun membre.</li>'
+    candidats = []
+    for personne in personnes:
+        if personne["administrateur"] or personne["organigramme_id"] == cible["id"]:
+            continue
+        ailleurs = noms_entites.get(personne["organigramme_id"]) or "Sans affectation"
+        candidats.append(
+            f'<li data-agent="{echapper((personne["nom"] + " " + (personne["courriel"] or "")).lower())}">'
+            f'<form method="post" action="/organigramme/{identifiant}/affecter">'
+            f"{jeton_cache(ctx)}"
+            f'<input type="hidden" name="retour" value="{echapper(retour)}">'
+            f'<button type="submit" name="utilisateur_id" value="{int(personne["id"])}" '
+            f'data-identifiant="{echapper(personne["identifiant"])}">'
+            f"<strong>{echapper(personne['nom'])}</strong>"
+            f"<span class=\"meta-agent\">{echapper(ailleurs)}</span>"
+            "</button></form></li>"
+        )
+    return (
+        f'<div class="voile" id="affecter-agent"><div class="dialogue large">'
+        f'<a class="fermer" href="{echapper(retour)}" aria-label="Fermer">×</a>'
+        f"<h2>Affecter des agents à « {echapper(cible['nom'])} »</h2>"
+        "<p class=\"chapeau\">Cliquez sur un agent pour l’ajouter, ou sur × pour le retirer. "
+        "Le rôle du compte ne change pas.</p>"
+        '<div class="colonnes-agents">'
+        f"<div><h3>Membres actuels ({len(membres)})</h3><ul class=\"liste-agents\">{liste_membres}</ul></div>"
+        "<div><h3>Ajouter un agent</h3>"
+        '<label class="visually-hidden" for="filtre-agent">Rechercher</label>'
+        '<input id="filtre-agent" data-filtre="candidats-agent" placeholder="Rechercher…">'
+        f'<ul id="candidats-agent" class="liste-agents">{"".join(candidats)}</ul>'
+        f'<select class="visually-hidden" aria-hidden="true">{choix_personnes}</select>'
+        "</div></div></div></div>"
+    )
 
 
 def _entier(valeur):
@@ -680,7 +750,7 @@ def _entier(valeur):
 
 
 def _options_parents(postes, choisi, exclus):
-    options = ['<option value="">— Racine —</option>']
+    options = ['<option value="">— Racine (aucun parent) —</option>']
     for poste in postes:
         if poste["id"] in exclus:
             continue

@@ -1,6 +1,17 @@
 // Bouton « Utiliser ma position » à côté de chaque champ Latitude.
 // Le téléphone de l’agent ou de l’abonné remplit latitude et longitude.
 document.addEventListener("DOMContentLoaded", function () {
+  document.querySelectorAll("[data-filtre]").forEach(function (champ) {
+    champ.addEventListener("input", function () {
+      var liste = document.getElementById(champ.getAttribute("data-filtre"));
+      if (!liste) return;
+      var cherche = champ.value.toLowerCase().trim();
+      liste.querySelectorAll("[data-agent]").forEach(function (ligne) {
+        var texte = ligne.getAttribute("data-agent") || "";
+        ligne.hidden = cherche.length > 0 && texte.indexOf(cherche) === -1;
+      });
+    });
+  });
   document.querySelectorAll("[data-regenerer]").forEach(function (bouton) {
     bouton.addEventListener("click", function () {
       var cible = document.getElementById(bouton.getAttribute("data-regenerer"));

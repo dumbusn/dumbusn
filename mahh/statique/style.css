@@ -246,7 +246,10 @@ optgroup { font-weight: 700; }
   justify-content: flex-end;
   gap: 0.7rem;
   font-size: 0.88rem;
+  opacity: 0;
 }
+.arbre li:hover .actions-entite,
+.arbre li:focus-within .actions-entite { opacity: 1; }
 .feuille .actions-entite { top: 0.55rem; }
 .danger-lien { color: var(--rouge); }
 .voile {
@@ -285,6 +288,25 @@ optgroup { font-weight: 700; }
   font-size: 1.4rem;
 }
 .deux-champs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+.deux-champs.codes { grid-template-columns: 1fr 2fr; }
+.majuscules { text-transform: uppercase; }
+.dialogue.large { width: min(52rem, 100%); }
+.colonnes-agents { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.6rem; }
+.liste-agents {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0.3rem;
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--filet);
+  border-radius: 8px;
+}
+.liste-agents li { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; border: 0; padding: 0.15rem 0.2rem; }
+.liste-agents form { margin: 0; }
+.liste-agents button { background: transparent; color: inherit; border: 0; text-align: left; width: 100%; }
+.liste-agents button:hover { background: #eef2f4; }
+.pastilles { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.orphelins { margin-top: 1rem; border-color: #e6c98a; }
 .barre-agents { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 .barre-agents h2 { margin: 0.8rem 0; }
 .recherche { margin: 0; }

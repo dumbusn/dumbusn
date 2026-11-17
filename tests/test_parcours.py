@@ -701,7 +701,7 @@ def parcours(hote, numero):
     )
     _, _, directions_ministre, _ = ministre.appel("GET", "/directions")
     verifie(
-        "Nouvelle entité racine" in directions_ministre and "— Racine —" in directions_ministre,
+        "Nouvelle entité racine" in directions_ministre and "Racine (aucun parent)" in directions_ministre,
         "le ministre crée une entité depuis la racine",
     )
     _, _, saisie, _ = admin.appel("GET", "/bsd/saisie")
